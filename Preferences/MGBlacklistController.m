@@ -1,6 +1,7 @@
 // MyGestures App黑名单子页面 v0.1.0
 // 枚举已安装 App, 每行一个开关: 开 = 加入黑名单 (偏好键 bl_<bundleid>)
 // tweak 侧在每个 App 进程内读同键判断, 黑名单内全部状态栏手势失效
+// 注: 14.5 SDK 头文件未声明 preferenceSpecifierWithName:... , 用 objc_msgSend 动态调用
 #import <Preferences/Preferences.h>
 #import <UIKit/UIKit.h>
 #import <MobileCoreServices/MobileCoreServices.h>
@@ -8,6 +9,14 @@
 #import <objc/runtime.h>
 
 #define MG_SUITE @"com.local.mygestures"
+
+static id MGNewSpec(id ctrl, NSString *name, id target, SEL set, SEL get, id detail, NSInteger cell)
+{
+    SEL sel = NSSelectorFromString(@"preferenceSpecifierWithName:target:set:get:detail:cell:edit:");
+    id (*msg)(id, SEL, NSString *, id, SEL, SEL, id, NSInteger, NSInteger) =
+        (id (*)(id, SEL, NSString *, id, SEL, SEL, id, NSInteger, NSInteger))objc_msgSend;
+    return msg(ctrl, sel, name, target, set, get, detail, cell, 0);
+}
 
 @interface MGBlacklistController : PSListController
 @end
@@ -25,8 +34,7 @@
     if (!_specifiers) {
         NSMutableArray *m = [NSMutableArray array];
 
-        PSSpecifier *g = [self preferenceSpecifierWithName:@"应用列表" target:nil
-            set:NULL get:NULL detail:nil cell:PSGroupCell edit:0];
+        PSSpecifier *g = MGNewSpec(self, @"应用列表", nil, NULL, NULL, nil, PSGroupCell);
         [g setProperty:@"应用列表" forKey:@"label"];
         [g setProperty:@"开关打开 = 加入黑名单，该 App 内全部状态栏手势失效。默认全部关闭（都可用）。\n主界面（SpringBoard）不受黑名单影响。" forKey:@"footerText"];
         [m addObject:g];
@@ -55,9 +63,8 @@
         }];
 
         for (NSArray *row in rows) {
-            PSSpecifier *s = [self preferenceSpecifierWithName:row[0] target:nil
-                set:@selector(setPreferenceValue:specifier:) get:@selector(readPreferenceValue:)
-                detail:nil cell:PSSwitchCell edit:0];
+            PSSpecifier *s = MGNewSpec(self, row[0], nil,
+                @selector(setPreferenceValue:specifier:), @selector(readPreferenceValue:), nil, PSSwitchCell);
             [s setProperty:MG_SUITE forKey:@"defaults"];
             [s setProperty:[@"bl_" stringByAppendingString:row[1]] forKey:@"key"];
             [m addObject:s];

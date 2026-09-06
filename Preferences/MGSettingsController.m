@@ -2,6 +2,7 @@
 // 功能: 顶部状态栏示意图(绿耳朵/红遮挡区) + 分区模式条件显隐 + 全局设置项
 // 面板沿用「系统-设置出现面板菜单的方法」已验证方案:
 //   只 import <Preferences/Preferences.h>、PSListController 子类
+// 注: 14.5 SDK 头文件未声明 preferenceSpecifierWithName:... , 用 objc_msgSend 动态调用
 #import <Preferences/Preferences.h>
 #import <UIKit/UIKit.h>
 #import <objc/message.h>
@@ -10,6 +11,16 @@
 #define MG_SUITE @"com.local.mygestures"
 
 @class MGBlacklistController;
+
+#pragma mark - 规格构建辅助 (SDK 头文件缺声明, 走 msgSend)
+
+static id MGNewSpec(id ctrl, NSString *name, id target, SEL set, SEL get, id detail, NSInteger cell)
+{
+    SEL sel = NSSelectorFromString(@"preferenceSpecifierWithName:target:set:get:detail:cell:edit:");
+    id (*msg)(id, SEL, NSString *, id, SEL, SEL, id, NSInteger, NSInteger) =
+        (id (*)(id, SEL, NSString *, id, SEL, SEL, id, NSInteger, NSInteger))objc_msgSend;
+    return msg(ctrl, sel, name, target, set, get, detail, cell, 0);
+}
 
 #pragma mark - 动作选项表
 
@@ -40,7 +51,7 @@ static NSArray *MGTitles(NSArray *values) {
     return t;
 }
 
-#pragma mark - 规格构建辅助
+#pragma mark - 规格构建
 
 // 把出厂默认值固化进偏好, 让面板首次打开就显示默认选中项 (tweak 侧同值, 两侧一致)
 static void MGEnsureDefault(NSString *key, id value)
@@ -53,7 +64,7 @@ static void MGEnsureDefault(NSString *key, id value)
 
 static PSSpecifier *MGGroup(id ctrl, NSString *label, NSString *footer)
 {
-    PSSpecifier *s = [ctrl preferenceSpecifierWithName:label target:nil set:NULL get:NULL detail:nil cell:PSGroupCell edit:0];
+    PSSpecifier *s = MGNewSpec(ctrl, label, nil, NULL, NULL, nil, PSGroupCell);
     [s setProperty:label forKey:@"label"];
     if (footer) [s setProperty:footer forKey:@"footerText"];
     return s;
@@ -61,9 +72,8 @@ static PSSpecifier *MGGroup(id ctrl, NSString *label, NSString *footer)
 
 static PSSpecifier *MGSwitch(id ctrl, NSString *name, NSString *key)
 {
-    PSSpecifier *s = [ctrl preferenceSpecifierWithName:name target:nil
-        set:@selector(setPreferenceValue:specifier:) get:@selector(readPreferenceValue:)
-        detail:nil cell:PSSwitchCell edit:0];
+    PSSpecifier *s = MGNewSpec(ctrl, name, nil,
+        @selector(setPreferenceValue:specifier:), @selector(readPreferenceValue:), nil, PSSwitchCell);
     [s setProperty:MG_SUITE forKey:@"defaults"];
     [s setProperty:key forKey:@"key"];
     return s;
@@ -71,9 +81,8 @@ static PSSpecifier *MGSwitch(id ctrl, NSString *name, NSString *key)
 
 static PSSpecifier *MGSelect(id ctrl, NSString *name, NSString *key, NSString *def, NSArray *values)
 {
-    PSSpecifier *s = [ctrl preferenceSpecifierWithName:name target:nil
-        set:@selector(setPreferenceValue:specifier:) get:@selector(readPreferenceValue:)
-        detail:nil cell:PSListItemCell edit:0];
+    PSSpecifier *s = MGNewSpec(ctrl, name, nil,
+        @selector(setPreferenceValue:specifier:), @selector(readPreferenceValue:), nil, PSListItemCell);
     [s setProperty:MG_SUITE forKey:@"defaults"];
     [s setProperty:key forKey:@"key"];
     [s setProperty:def forKey:@"default"];
@@ -84,9 +93,8 @@ static PSSpecifier *MGSelect(id ctrl, NSString *name, NSString *key, NSString *d
 
 static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
 {
-    PSSpecifier *s = [ctrl preferenceSpecifierWithName:name target:nil
-        set:@selector(setPreferenceValue:specifier:) get:@selector(readPreferenceValue:)
-        detail:nil cell:PSSliderCell edit:0];
+    PSSpecifier *s = MGNewSpec(ctrl, name, nil,
+        @selector(setPreferenceValue:specifier:), @selector(readPreferenceValue:), nil, PSSliderCell);
     [s setProperty:MG_SUITE forKey:@"defaults"];
     [s setProperty:key forKey:@"key"];
     [s setProperty:@0.20 forKey:@"min"];
@@ -131,9 +139,8 @@ static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
         BOOL splitOn = [splitVal isKindOfClass:[NSNumber class]] ? [splitVal boolValue] : NO;
 
         // ===== 分区模式开关 (切换后重建列表) =====
-        PSSpecifier *split = [self preferenceSpecifierWithName:@"启用状态栏左右分区" target:self
-            set:@selector(setSplitMode:specifier:) get:@selector(readSplitMode:)
-            detail:nil cell:PSSwitchCell edit:0];
+        PSSpecifier *split = MGNewSpec(self, @"启用状态栏左右分区", self,
+            @selector(setSplitMode:specifier:), @selector(readSplitMode:), nil, PSSwitchCell);
         [m addObject:MGGroup(self, @"分区模式", @"关闭：左右耳朵共用同一套手势配置。\n开启：左段（时间侧）与右段（电池信号侧）完全独立配置，互不干扰。")];
         [m addObject:split];
 
@@ -162,8 +169,8 @@ static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
         [m addObject:MGSwitch(self, @"手势震动反馈", @"hapticsEnabled")];
         [m addObject:MGSlider(self, @"双击识别间隔(秒)", @"tapInterval")];
         [m addObject:MGGroup(self, @"应用管理", nil)];
-        PSSpecifier *bl = [self preferenceSpecifierWithName:@"App黑名单" target:self
-            set:NULL get:NULL detail:NSClassFromString(@"MGBlacklistController") cell:PSLinkCell edit:0];
+        PSSpecifier *bl = MGNewSpec(self, @"App黑名单", self, NULL, NULL,
+            NSClassFromString(@"MGBlacklistController"), PSLinkCell);
         [m addObject:bl];
 
         _specifiers = [m copy];
