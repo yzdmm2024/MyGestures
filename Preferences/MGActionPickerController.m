@@ -46,7 +46,7 @@ NSString *MGActionTitle(NSString *act)
         @"appswitcher":   @"App切换器（多任务）",
         @"camera":        @"相机",
         @"wlan":          @"无线局域网",
-        @"cellular":      @"蜂窝网络",
+        @"cellular":          @"蜂窝网络开关",
     };
     return map[act] ?: act;
 }
@@ -90,8 +90,14 @@ static NSArray *MGActsSwipe(void)  { return @[@"none", @"lock", @"screenshot", @
 
         PSSpecifier *g = MGNewSpec(self, @"选择动作", nil, NULL, NULL, nil, PSGroupCell);
         [g setProperty:@"选择动作" forKey:@"label"];
-        [g setProperty:@"单选：打开一项即选中（其余自动关闭），立即生效；把当前项关掉 = 改为「无」。返回后主页面右侧会显示当前选中项。" forKey:@"footerText"];
+        [g setProperty:@"单选：打开一项即选中（其余自动关闭），立即生效；把当前项关掉 = 改为「无」。返回后主页面右侧会显示当前选中项。\n要打开某个 App，点最上面的「打开应用…」。返回后主页面右侧会显示当前选中项。" forKey:@"footerText"];
         [m addObject:g];
+
+        // ===== 打开应用: 置顶入口 (按手势独立的应用选择页, 搜索+图标+单选) =====
+        PSSpecifier *appRow = MGNewSpec(self, @"打开应用…", self,
+            NULL, @selector(mgAppCurrentValue:), NSClassFromString([[self class] mgAppPickerClass]), PSLinkCell);
+        [appRow setProperty:NSClassFromString([[self class] mgAppPickerClass]) forKey:@"detail"];
+        [m addObject:appRow];
 
         // 当前选中的动作
         NSString *key = [[self class] mgKey];
@@ -105,16 +111,6 @@ static NSArray *MGActsSwipe(void)  { return @[@"none", @"lock", @"screenshot", @
         }
 
         // ===== 打开应用: 进入按手势独立的应用选择页 (搜索+图标+单选) =====
-        // ===== 打开应用: 进入按手势独立的应用选择页 (搜索+图标+单选) =====
-        PSSpecifier *ag = MGNewSpec(self, @"打开应用", nil, NULL, NULL, nil, PSGroupCell);
-        [ag setProperty:@"打开应用" forKey:@"label"];
-        [ag setProperty:@"点击「打开应用…」进入应用选择页（含搜索与图标，含苹果预装与 App Store 应用），选中后手势执行时打开该应用。" forKey:@"footerText"];
-        [m addObject:ag];
-        PSSpecifier *appRow = MGNewSpec(self, @"打开应用…", self,
-            NULL, @selector(mgAppCurrentValue:), NSClassFromString([[self class] mgAppPickerClass]), PSLinkCell);
-        [appRow setProperty:NSClassFromString([[self class] mgAppPickerClass]) forKey:@"detail"];
-        [m addObject:appRow];
-
         _specifiers = [m copy];
     }
     return _specifiers;
