@@ -51,17 +51,17 @@ static void MGEnsureDefault(NSString *key, id value)
     }
 }
 
-static PSSpecifier *MGGroup(NSString *label, NSString *footer)
+static PSSpecifier *MGGroup(id ctrl, NSString *label, NSString *footer)
 {
-    PSSpecifier *s = [PSSpecifier preferenceSpecifierWithName:label target:nil set:NULL get:NULL detail:nil cell:PSGroupCell edit:0];
+    PSSpecifier *s = [ctrl preferenceSpecifierWithName:label target:nil set:NULL get:NULL detail:nil cell:PSGroupCell edit:0];
     [s setProperty:label forKey:@"label"];
     if (footer) [s setProperty:footer forKey:@"footerText"];
     return s;
 }
 
-static PSSpecifier *MGSwitch(NSString *name, NSString *key)
+static PSSpecifier *MGSwitch(id ctrl, NSString *name, NSString *key)
 {
-    PSSpecifier *s = [PSSpecifier preferenceSpecifierWithName:name target:nil
+    PSSpecifier *s = [ctrl preferenceSpecifierWithName:name target:nil
         set:@selector(setPreferenceValue:specifier:) get:@selector(readPreferenceValue:)
         detail:nil cell:PSSwitchCell edit:0];
     [s setProperty:MG_SUITE forKey:@"defaults"];
@@ -69,11 +69,11 @@ static PSSpecifier *MGSwitch(NSString *name, NSString *key)
     return s;
 }
 
-static PSSpecifier *MGSelect(NSString *name, NSString *key, NSString *def, NSArray *values)
+static PSSpecifier *MGSelect(id ctrl, NSString *name, NSString *key, NSString *def, NSArray *values)
 {
-    PSSpecifier *s = [PSSpecifier preferenceSpecifierWithName:name target:nil
+    PSSpecifier *s = [ctrl preferenceSpecifierWithName:name target:nil
         set:@selector(setPreferenceValue:specifier:) get:@selector(readPreferenceValue:)
-        detail:nil cell:PSListItemsCell edit:0];
+        detail:nil cell:PSListItemCell edit:0];
     [s setProperty:MG_SUITE forKey:@"defaults"];
     [s setProperty:key forKey:@"key"];
     [s setProperty:def forKey:@"default"];
@@ -82,9 +82,9 @@ static PSSpecifier *MGSelect(NSString *name, NSString *key, NSString *def, NSArr
     return s;
 }
 
-static PSSpecifier *MGSlider(NSString *name, NSString *key)
+static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
 {
-    PSSpecifier *s = [PSSpecifier preferenceSpecifierWithName:name target:nil
+    PSSpecifier *s = [ctrl preferenceSpecifierWithName:name target:nil
         set:@selector(setPreferenceValue:specifier:) get:@selector(readPreferenceValue:)
         detail:nil cell:PSSliderCell edit:0];
     [s setProperty:MG_SUITE forKey:@"defaults"];
@@ -131,39 +131,39 @@ static PSSpecifier *MGSlider(NSString *name, NSString *key)
         BOOL splitOn = [splitVal isKindOfClass:[NSNumber class]] ? [splitVal boolValue] : NO;
 
         // ===== 分区模式开关 (切换后重建列表) =====
-        PSSpecifier *split = [PSSpecifier preferenceSpecifierWithName:@"启用状态栏左右分区" target:self
+        PSSpecifier *split = [self preferenceSpecifierWithName:@"启用状态栏左右分区" target:self
             set:@selector(setSplitMode:specifier:) get:@selector(readSplitMode:)
             detail:nil cell:PSSwitchCell edit:0];
-        [m addObject:MGGroup(@"分区模式", @"关闭：左右耳朵共用同一套手势配置。\n开启：左段（时间侧）与右段（电池信号侧）完全独立配置，互不干扰。")];
+        [m addObject:MGGroup(self, @"分区模式", @"关闭：左右耳朵共用同一套手势配置。\n开启：左段（时间侧）与右段（电池信号侧）完全独立配置，互不干扰。")];
         [m addObject:split];
 
         if (!splitOn) {
             // ===== 模式1: 左右耳朵共用 =====
-            [m addObject:MGGroup(@"公共手势（左右耳朵共用）", @"手势选「无」代表单独禁用该手势，无需关闭整个插件。\n长按、三击、上滑、下滑始终交给系统，不占用。")];
-            [m addObject:MGSelect(@"单击", @"singleTap", @"none", MGValuesSingle())];
-            [m addObject:MGSelect(@"双击", @"doubleTap", @"lock", MGValuesDouble())];
-            [m addObject:MGSelect(@"左滑", @"swipeLeft", @"flashlight", MGValuesSwipe())];
+            [m addObject:MGGroup(self, @"公共手势（左右耳朵共用）", @"手势选「无」代表单独禁用该手势，无需关闭整个插件。\n长按、三击、上滑、下滑始终交给系统，不占用。")];
+            [m addObject:MGSelect(self, @"单击", @"singleTap", @"none", MGValuesSingle())];
+            [m addObject:MGSelect(self, @"双击", @"doubleTap", @"lock", MGValuesDouble())];
+            [m addObject:MGSelect(self, @"左滑", @"swipeLeft", @"flashlight", MGValuesSwipe())];
         } else {
             // ===== 模式2: 左右分段独立 =====
-            [m addObject:MGGroup(@"状态栏‑左段｜时间侧", @"刘海/灵动岛左侧的耳朵区域，只在此区域内生效。")];
-            [m addObject:MGSelect(@"单击", @"left_singleTap", @"none", MGValuesSingle())];
-            [m addObject:MGSelect(@"双击", @"left_doubleTap", @"lock", MGValuesDouble())];
-            [m addObject:MGSelect(@"左滑", @"left_swipeLeft", @"flashlight", MGValuesSwipe())];
+            [m addObject:MGGroup(self, @"状态栏‑左段｜时间侧", @"刘海/灵动岛左侧的耳朵区域，只在此区域内生效。")];
+            [m addObject:MGSelect(self, @"单击", @"left_singleTap", @"none", MGValuesSingle())];
+            [m addObject:MGSelect(self, @"双击", @"left_doubleTap", @"lock", MGValuesDouble())];
+            [m addObject:MGSelect(self, @"左滑", @"left_swipeLeft", @"flashlight", MGValuesSwipe())];
 
-            [m addObject:MGGroup(@"状态栏‑右段｜电池信号侧", @"刘海/灵动岛右侧的耳朵区域（信号/Wi‑Fi/电池），只在此区域内生效。")];
-            [m addObject:MGSelect(@"单击", @"right_singleTap", @"none", MGValuesSingle())];
-            [m addObject:MGSelect(@"双击", @"right_doubleTap", @"lock", MGValuesDouble())];
-            [m addObject:MGSelect(@"左滑", @"right_swipeLeft", @"flashlight", MGValuesSwipe())];
+            [m addObject:MGGroup(self, @"状态栏‑右段｜电池信号侧", @"刘海/灵动岛右侧的耳朵区域（信号/Wi‑Fi/电池），只在此区域内生效。")];
+            [m addObject:MGSelect(self, @"单击", @"right_singleTap", @"none", MGValuesSingle())];
+            [m addObject:MGSelect(self, @"双击", @"right_doubleTap", @"lock", MGValuesDouble())];
+            [m addObject:MGSelect(self, @"左滑", @"right_swipeLeft", @"flashlight", MGValuesSwipe())];
         }
 
         // ===== 全局设置 =====
-        [m addObject:MGGroup(@"全局设置", @"所有设置修改即时生效，无需 Respring。\n黑名单 App 内全部状态栏手势失效；刘海/灵动岛本体触摸始终直接忽略。")];
-        [m addObject:MGSwitch(@"锁屏界面启用手势", @"lockScreenEnabled")];
-        [m addObject:MGSwitch(@"手势震动反馈", @"hapticsEnabled")];
-        [m addObject:MGSlider(@"双击识别间隔(秒)", @"tapInterval")];
-        [m addObject:MGGroup(@"应用管理", nil)];
-        PSSpecifier *bl = [PSSpecifier preferenceSpecifierWithName:@"App黑名单" target:self
-            set:NULL get:NULL detail:[MGBlacklistController class] cell:PSLinkCell edit:0];
+        [m addObject:MGGroup(self, @"全局设置", @"所有设置修改即时生效，无需 Respring。\n黑名单 App 内全部状态栏手势失效；刘海/灵动岛本体触摸始终直接忽略。")];
+        [m addObject:MGSwitch(self, @"锁屏界面启用手势", @"lockScreenEnabled")];
+        [m addObject:MGSwitch(self, @"手势震动反馈", @"hapticsEnabled")];
+        [m addObject:MGSlider(self, @"双击识别间隔(秒)", @"tapInterval")];
+        [m addObject:MGGroup(self, @"应用管理", nil)];
+        PSSpecifier *bl = [self preferenceSpecifierWithName:@"App黑名单" target:self
+            set:NULL get:NULL detail:NSClassFromString(@"MGBlacklistController") cell:PSLinkCell edit:0];
         [m addObject:bl];
 
         _specifiers = [m copy];
@@ -180,7 +180,7 @@ static PSSpecifier *MGSlider(NSString *name, NSString *key)
 - (void)setSplitMode:(id)value specifier:(PSSpecifier *)spec
 {
     CFPreferencesSetAppValue(CFSTR("splitMode"),
-        [value boolValue] ? (__bridge CFTypeRef)kCFBooleanTrue : (__bridge CFTypeRef)kCFBooleanFalse,
+        [value boolValue] ? kCFBooleanTrue : kCFBooleanFalse,
         (__bridge CFStringRef)MG_SUITE);
     CFPreferencesAppSynchronize((__bridge CFStringRef)MG_SUITE);
     _specifiers = nil;

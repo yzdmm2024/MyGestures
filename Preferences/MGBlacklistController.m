@@ -25,7 +25,7 @@
     if (!_specifiers) {
         NSMutableArray *m = [NSMutableArray array];
 
-        PSSpecifier *g = [PSSpecifier preferenceSpecifierWithName:@"应用列表" target:nil
+        PSSpecifier *g = [self preferenceSpecifierWithName:@"应用列表" target:nil
             set:NULL get:NULL detail:nil cell:PSGroupCell edit:0];
         [g setProperty:@"应用列表" forKey:@"label"];
         [g setProperty:@"开关打开 = 加入黑名单，该 App 内全部状态栏手势失效。默认全部关闭（都可用）。\n主界面（SpringBoard）不受黑名单影响。" forKey:@"footerText"];
@@ -55,7 +55,7 @@
         }];
 
         for (NSArray *row in rows) {
-            PSSpecifier *s = [PSSpecifier preferenceSpecifierWithName:row[0] target:nil
+            PSSpecifier *s = [self preferenceSpecifierWithName:row[0] target:nil
                 set:@selector(setPreferenceValue:specifier:) get:@selector(readPreferenceValue:)
                 detail:nil cell:PSSwitchCell edit:0];
             [s setProperty:MG_SUITE forKey:@"defaults"];
