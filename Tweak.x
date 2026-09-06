@@ -439,7 +439,22 @@ static void MGAppSwitcher(void)
 static void MGDispatchAction(NSString *action); // 前置声明(run 回环用)
 static void MGOpenCamera(void)   { MGOpenURLString(@"camera://"); }
 static void MGOpenWLAN(void)     { MGOpenURLString(@"prefs:root=WIFI"); }
-static void MGOpenCellular(void) { MGOpenURLString(@"prefs:root=MOBILE_DATA_SETTINGS_ID"); }
+static void MGToggleCellular(void)
+{
+    Class c = objc_getClass("SBTelephonyManager");
+    if (c) {
+        id inst = ((id (*)(id, SEL))objc_msgSend)(c, sel_registerName("sharedInstance"));
+        SEL g = sel_registerName("isCellDataSwitchingEnabled");
+        SEL s = sel_registerName("setCellDataSwitchingEnabled:");
+        if (inst && [inst respondsToSelector:g] && [inst respondsToSelector:s]) {
+            BOOL cur = ((BOOL (*)(id, SEL))objc_msgSend)(inst, g);
+            ((void (*)(id, SEL, BOOL))objc_msgSend)(inst, s, !cur);
+            MGLog(@"蜂窝网络开关 成功 (原值=%d)", cur);
+            return;
+        }
+    }
+    MGOpenURLString(@"prefs:root=MOBILE_DATA_SETTINGS_ID");
+}
 
 // 打开指定 App: 常用 App 走内置 scheme 表; 无 scheme 的用快捷指令桥接 (我的链接)
 static void MGOpenAppByID(NSString *bid)
@@ -557,7 +572,7 @@ static void MGPerformInSpringBoard(NSString *action)
     else if ([action isEqualToString:@"appswitcher"]) MGAppSwitcher();
     else if ([action isEqualToString:@"camera"])      MGOpenCamera();
     else if ([action isEqualToString:@"wlan"])        MGOpenWLAN();
-    else if ([action isEqualToString:@"cellular"])    MGOpenCellular();
+    else if ([action isEqualToString:@"cellular"])    MGToggleCellular();
     MGHaptic(); // 手势执行成功震动
 }
 

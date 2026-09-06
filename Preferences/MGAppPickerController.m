@@ -61,6 +61,16 @@ static UIImage *MGIconFromBundlePath(NSString *appPath)
     return nil;
 }
 
+// 图标统一缩放到 29pt (适配列表行高, 避免撑坏排版)
+static UIImage *MGIconResized(UIImage *img)
+{
+    if (!img || img.size.width <= 29.0) return img;
+    UIGraphicsImageRenderer *r = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(29, 29)];
+    return [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+        [img drawInRect:CGRectMake(0, 0, 29, 29)];
+    }];
+}
+
 // 全量应用行: @[名称, bundleid, 包路径] — 过滤掉无图标的系统级程序
 // (黑名单页共用本函数, 保证两边列表一致)
 NSArray *MGAppRows(void)
@@ -248,7 +258,7 @@ NSString *MGAppTitleForBid(NSString *bid)
                     NSString *bid = row[1];
                     UIImage *img = _iconCache[bid];
                     if (!img) {
-                        img = MGIconFromBundlePath(row[2]);
+                        img = MGIconResized(MGIconFromBundlePath(row[2]));
                         if (!img) img = [UIImage new];
                         _iconCache[bid] = img;
                     }
