@@ -435,7 +435,37 @@ static void MGAppSwitcher(void)
     MGLog(@"App切换器失败: SBUIController 不可用");
 }
 
-// 从 SpringBoard 打开 URL (16.6 实测安全不崩的通路)
+// 0.4.0 新增: 相机 / 无线局域网设置页 / 蜂窝网络设置页 (全部走已验证的 URL 通路)
+static void MGOpenCamera(void)   { MGOpenURLString(@"camera://"); }
+static void MGOpenWLAN(void)     { MGOpenURLString(@"prefs:root=WIFI"); }
+static void MGOpenCellular(void) { MGOpenURLString(@"prefs:root=MOBILE_DATA_SETTINGS_ID"); }
+
+// 打开指定 App: 常用 App 走内置 scheme 表; 无 scheme 的用快捷指令桥接 (我的链接)
+static void MGOpenAppByID(NSString *bid)
+{
+    NSDictionary *map = @{
+        @"com.tencent.xin":          @"weixin://",        // 微信
+        @"com.tencent.mqq":          @"mqq://",           // QQ
+        @"com.alipay.iphoneclient":  @"alipay://",        // 支付宝
+        @"com.taobao.taobao4iphone": @"taobao://",        // 淘宝
+        @"com.xunmeng.pinduoduo":    @"pinduoduo://",     // 拼多多
+        @"com.ss.iphone.ugc.Aweme":  @"snssdk1128://",    // 抖音
+        @"com.smile.gifmaker":       @"kwai://",          // 快手
+        @"com.sina.weibo":           @"sinaweibo://",     // 微博
+        @"com.netease.cloudmusic":   @"orpheus://",       // 网易云音乐
+        @"com.baidu.BaiduMobile":    @"BaiduSSO://",      // 百度
+        @"com.autonavi.minimap":     @"iosamap://",       // 高德地图
+        @"com.jingdong.app.mall":    @"openapp.jdmobile://", // 京东
+    };
+    NSString *scheme = map[bid];
+    if (scheme.length > 0) { MGOpenURLString(scheme); return; }
+    MGLog(@"打开应用失败: 「%@」暂无内置通路, 可在快捷指令建「打开App」后经 我的链接 绑定", bid);
+}
+
+// 从 SpringBoard 打开 URL
+// 16.6 唯一可用通路 (frida 钩子实测请求真实到达 SB 总入口):
+//   dlopen SpringBoardServices → SBSOpenSensitiveURL (老 SBSOpenSensitiveURLWithOptions 的改名版)
+//   (FBSSystemService openURL 是静默哑火, 勿用)
 static void MGOpenURLString(NSString *urlString)
 {
     if (urlString.length == 0) { MGLog(@"打开链接失败: 空地址"); return; }
@@ -443,17 +473,18 @@ static void MGOpenURLString(NSString *urlString)
     if (!url || !url.scheme)
         url = [NSURL URLWithString:[@"https://" stringByAppendingString:urlString]]; // 裸域名兜底
     if (!url) { MGLog(@"打开链接失败: 无效地址 %@", urlString); return; }
-    Class c = objc_getClass("FBSSystemService");
-    if (c) {
-        id svc = ((id (*)(id, SEL))objc_msgSend)(c, sel_registerName("sharedService"));
-        SEL o = sel_registerName("openURL:application:options:clientPort:withResult:");
-        if (svc && [svc respondsToSelector:o]) {
-            ((void (*)(id, SEL, id, id, id, unsigned int, id))objc_msgSend)(svc, o, url, nil, nil, 0, nil);
-            MGLog(@"打开链接成功 (%@)", url);
-            return;
-        }
+    static void (*sbsOpen)(CFURLRef, int) = NULL;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        void *h = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_LAZY);
+        if (h) sbsOpen = (void (*)(CFURLRef, int))dlsym(h, "SBSOpenSensitiveURL");
+    });
+    if (sbsOpen) {
+        sbsOpen((__bridge CFURLRef)url, 0);
+        MGLog(@"打开链接成功 (%@)", url);
+        return;
     }
-    MGLog(@"打开链接失败: FBSSystemService 不可用");
+    MGLog(@"打开链接失败: SBSOpenSensitiveURL 不可用");
 }
 
 // 执行预设链接: 按名称查 links 预设表 (数组, 每项 {n:名称, u:网址})
@@ -523,6 +554,9 @@ static void MGPerformInSpringBoard(NSString *action)
     else if ([action isEqualToString:@"voldown"])     MGVolDown();
     else if ([action isEqualToString:@"mute"])        MGMute();
     else if ([action isEqualToString:@"appswitcher"]) MGAppSwitcher();
+    else if ([action isEqualToString:@"camera"])      MGOpenCamera();
+    else if ([action isEqualToString:@"wlan"])        MGOpenWLAN();
+    else if ([action isEqualToString:@"cellular"])    MGOpenCellular();
     MGHaptic(); // 手势执行成功震动
 }
 
@@ -538,6 +572,11 @@ static void MGDarwinCallback(CFNotificationCenterRef center, void *observer,
         if ([action isEqualToString:@"link"]) { // 取出转发来的链接名称
             NSString *name = CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)@"pendingLink", (__bridge CFStringRef)kSuite));
             if ([name isKindOfClass:[NSString class]] && name.length > 0) MGRunLink(name);
+            return;
+        }
+        if ([action isEqualToString:@"run"]) { // 取出转发来的带参数动作 (app:/link:)
+            NSString *a = CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)@"pendingAction", (__bridge CFStringRef)kSuite));
+            if ([a isKindOfClass:[NSString class]] && a.length > 0) MGDispatchAction(a);
             return;
         }
         MGPerformInSpringBoard(action);
@@ -558,16 +597,21 @@ static void MGDispatchAction(NSString *action)
             MGHaptic();
             return;
         }
+        if ([action hasPrefix:@"app:"]) { // 打开应用: 按 bundle id 走 scheme 表
+            MGOpenAppByID([action substringFromIndex:4]);
+            MGHaptic();
+            return;
+        }
         MGLog(@"触发动作: %@", action);
         MGPerformInSpringBoard(action);
     } else {
-        if ([action hasPrefix:@"link:"]) { // 先把链接名称写进偏好, 再发通用通知 (通知名有长度限制)
-            CFPreferencesSetAppValue((__bridge CFStringRef)@"pendingLink",
-                (__bridge CFTypeRef)[action substringFromIndex:5], (__bridge CFStringRef)kSuite);
+        if ([action hasPrefix:@"app:"] || [action hasPrefix:@"link:"]) { // 带参数动作: 载荷写偏好, 发通用通知
+            CFPreferencesSetAppValue((__bridge CFStringRef)@"pendingAction",
+                (__bridge CFTypeRef)action, (__bridge CFStringRef)kSuite);
             CFPreferencesAppSynchronize((__bridge CFStringRef)kSuite);
             CFNotificationCenterPostNotification(
                 CFNotificationCenterGetDarwinNotifyCenter(),
-                (__bridge CFStringRef)[kNotifyPrefix stringByAppendingString:@"link"],
+                (__bridge CFStringRef)[kNotifyPrefix stringByAppendingString:@"run"],
                 NULL, NULL, TRUE);
             return;
         }
@@ -771,7 +815,8 @@ static BOOL MGAppBlacklisted(void)
             CFNotificationCenterRef nc = CFNotificationCenterGetDarwinNotifyCenter();
             for (NSString *a in @[@"lock", @"screenshot", @"respring", @"flashlight", @"home", @"settingspanel",
                                   @"wifi", @"bluetooth", @"airplane", @"lowpower", @"playpause", @"nexttrack", @"prevtrack",
-                                  @"volup", @"voldown", @"mute", @"appswitcher", @"link"]) {
+                                  @"volup", @"voldown", @"mute", @"appswitcher", @"link", @"run",
+                                  @"camera", @"wlan", @"cellular"]) {
                 CFNotificationCenterAddObserver(nc, NULL, MGDarwinCallback,
                     (__bridge CFStringRef)[kNotifyPrefix stringByAppendingString:a],
                     NULL, CFNotificationSuspensionBehaviorCoalesce);

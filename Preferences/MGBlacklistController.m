@@ -58,6 +58,8 @@ static UIImage *MGIconFromBundlePath(NSString *appPath)
     return nil;
 }
 
+NSArray *MGAppRows(void); // 在 MGAppPickerController.m 中实现 (预装+沙盒, 已过滤系统级)
+
 @interface MGBlacklistController : PSListController <UISearchBarDelegate>
 {
     NSArray *_rows;          // @[ @[名称, 包id, 包路径], ... ] 全量
@@ -114,45 +116,21 @@ static UIImage *MGIconFromBundlePath(NSString *appPath)
 - (NSArray *)allRows
 {
     if (!_rows) {
-        NSMutableArray *rows = [NSMutableArray array];
-        @try {
-            Class wsClass = objc_getClass("LSApplicationWorkspace");
-            if (wsClass) {
-                id ws = ((id (*)(id, SEL))objc_msgSend)(wsClass, @selector(defaultWorkspace));
-                NSArray *apps = nil;
-                if (ws) {
-                    // 16.6: allInstalledApplications; 老系统名一并兜底
-                    for (NSString *selName in @[@"allInstalledApplications", @"allInstalledApps", @"installedApps"]) {
-                        SEL s = NSSelectorFromString(selName);
-                        if ([ws respondsToSelector:s]) {
-                            apps = ((NSArray *(*)(id, SEL))objc_msgSend)(ws, s);
-                            if (apps.count > 0) break;
-                        }
-                    }
-                }
-                for (id app in apps ?: @[]) {
-                    @try {
-                        NSString *bid = [app respondsToSelector:@selector(bundleIdentifier)] ? [app bundleIdentifier] : nil;
-                        NSString *name = bid.length ? (MGAppName(app) ?: bid) : nil;
-                        if (!bid.length || !name.length) continue;
-                        NSString *bundlePath = nil;
-                        if ([app respondsToSelector:@selector(bundleURL)]) {
-                            NSURL *u = [app bundleURL];
-                            bundlePath = u ? u.path : nil;
-                        }
-                        [rows addObject:@[name, bid, bundlePath ?: @""]];
-                    } @catch (NSException *e) { /* 跳过异常项 */ }
-                }
-            }
-        } @catch (NSException *e) {
-            NSLog(@"[MyGestures] 枚举应用失败: %@", e);
-        }
-        [rows sortUsingComparator:^NSComparisonResult(NSArray *a, NSArray *b) {
-            return [a[0] compare:b[0] options:NSNumericSearch | NSCaseInsensitiveSearch];
-        }];
-        _rows = [rows copy];
+        // 与「打开应用」选择页共用同一份过滤列表: 苹果预装 + App Store 沙盒应用, 无系统级程序
+        _rows = [MGAppRows() copy];
     }
     return _rows;
+}
+
+// 图标统一缩放到 29pt (适配列表行高)
+static UIImage *MGIconResized(UIImage *img)
+{
+    if (!img || img.size.width <= 29.0) return img;
+    UIGraphicsImageRenderer *r = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(29, 29)];
+    img = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+        [img drawInRect:CGRectMake(0, 0, 29, 29)];
+    }];
+    return img;
 }
 
 - (UIImage *)iconForRow:(NSArray *)row
@@ -160,7 +138,7 @@ static UIImage *MGIconFromBundlePath(NSString *appPath)
     NSString *bid = row[1];
     UIImage *img = _iconCache[bid];
     if (img) return img;
-    img = MGIconFromBundlePath(row[2]);
+    img = MGIconResized(MGIconFromBundlePath(row[2]));
     if (!img) img = [UIImage new]; // 占位, 避免重复读盘
     _iconCache[bid] = img;
     return img;
