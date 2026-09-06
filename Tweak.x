@@ -22,6 +22,7 @@
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <QuartzCore/QuartzCore.h>
+#import <AudioToolbox/AudioToolbox.h>
 #import <dispatch/dispatch.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
@@ -162,27 +163,28 @@ static void MGLockScreen(void)
     MGLog(@"锁屏失败: 未找到可用方法");
 }
 
+// 截屏: iOS 16.6 的 SBScreenShotter 已不存在 (frida 反射实锤),
+// 改用系统截图器 SSScreenCapturer - takeScreenshot (无参, 走完整系统截屏流程)
 static void MGScreenshot(void)
 {
-    Class c = objc_getClass("SBScreenShotter");
+    Class c = objc_getClass("SSScreenCapturer");
     if (c) {
-        id inst = ((id (*)(id, SEL))objc_msgSend)(c, sel_registerName("sharedInstance"));
-        if (inst) {
-            NSArray *names = @[@"saveScreenshot", @"saveScreenshot:", @"takeScreenshot"];
-            for (NSString *n in names) {
-                SEL s = NSSelectorFromString(n);
-                if ([inst respondsToSelector:s]) {
-                    if ([n hasSuffix:@":"])
-                        ((void (*)(id, SEL, id))objc_msgSend)(inst, s, nil);
-                    else
-                        ((void (*)(id, SEL))objc_msgSend)(inst, s);
-                    MGLog(@"截屏成功 (SBScreenShotter %@)", n);
-                    return;
-                }
-            }
+        id inst = nil;
+        SEL si = sel_registerName("sharedInstance");
+        if ([c respondsToSelector:si])
+            inst = ((id (*)(id, SEL))objc_msgSend)(c, si);
+        if (!inst) {
+            id a = ((id (*)(id, SEL))objc_msgSend)(c, sel_registerName("alloc"));
+            inst = ((id (*)(id, SEL))objc_msgSend)(a, sel_registerName("init"));
+        }
+        SEL ts = sel_registerName("takeScreenshot");
+        if (inst && [inst respondsToSelector:ts]) {
+            ((void (*)(id, SEL))objc_msgSend)(inst, ts);
+            MGLog(@"截屏成功 (SSScreenCapturer takeScreenshot)");
+            return;
         }
     }
-    MGLog(@"截屏失败: SBScreenShotter 不可用");
+    MGLog(@"截屏失败: SSScreenCapturer 不可用");
 }
 
 static void MGToggleFlashlight(void)
@@ -205,22 +207,29 @@ static void MGRespring(void)
     exit(0);
 }
 
+// 返回主屏幕: 16.6 无 simulateHomeButtonClick, 用 handleHomeButtonSinglePressUpForWindowScene:
 static void MGGoHome(void)
 {
     Class c = objc_getClass("SBUIController");
     if (c) {
         id inst = ((id (*)(id, SEL))objc_msgSend)(c, sel_registerName("sharedInstance"));
         if (inst) {
-            SEL s = sel_registerName("simulateHomeButtonClick"); // iOS 13-16 通用
-            if ([inst respondsToSelector:s]) {
-                ((void (*)(id, SEL))objc_msgSend)(inst, s);
-                MGLog(@"返回主屏幕 (simulateHomeButtonClick)");
+            id scene = nil;
+            @try {
+                id app = ((id (*)(id, SEL))objc_msgSend)(objc_getClass("UIApplication"), sel_registerName("sharedApplication"));
+                id scenes = ((id (*)(id, SEL))objc_msgSend)(app, sel_registerName("connectedScenes"));
+                scene = ((id (*)(id, SEL))objc_msgSend)(scenes, sel_registerName("anyObject"));
+            } @catch (NSException *e) {}
+            SEL h1 = sel_registerName("handleHomeButtonSinglePressUpForWindowScene:");
+            if ([inst respondsToSelector:h1]) {
+                ((void (*)(id, SEL, id))objc_msgSend)(inst, h1, scene);
+                MGLog(@"返回主屏幕 (handleHomeButtonSinglePressUpForWindowScene:)");
                 return;
             }
-            s = sel_registerName("handleHomeButtonSinglePress");
-            if ([inst respondsToSelector:s]) {
-                ((void (*)(id, SEL))objc_msgSend)(inst, s);
-                MGLog(@"返回主屏幕 (handleHomeButtonSinglePress)");
+            SEL h2 = sel_registerName("handleHomeButtonSinglePressUpForWindowScene:withSourceType:");
+            if ([inst respondsToSelector:h2]) {
+                ((void (*)(id, SEL, id, long long))objc_msgSend)(inst, h2, scene, 0);
+                MGLog(@"返回主屏幕 (handleHomeButtonSinglePressUpForWindowScene:withSourceType:)");
                 return;
             }
         }
@@ -228,23 +237,40 @@ static void MGGoHome(void)
     MGLog(@"返回主屏幕失败: SBUIController 方法不可用");
 }
 
+// 打开设置面板: SBSOpenSensitiveURLWithOptions 在 SB 进程内不存在 (frida 实锤),
+// 改用 FBSystemServiceOpenApplicationRequest + FBSOpenApplicationService 打开设置
 static void MGOpenPrefsPanel(void)
 {
-    // 从 SpringBoard 打开 设置→我的手势; 深链不中时设置至少会打开到根页(入口就在根列表)
-    void *h = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_LAZY);
-    if (h) {
-        void (*openURL)(CFURLRef, BOOL) = (void (*)(CFURLRef, BOOL))dlsym(h, "SBSOpenSensitiveURLWithOptions");
-        if (openURL) {
-            CFURLRef url = CFURLCreateWithString(kCFAllocatorDefault, (CFStringRef)@"prefs:root=MyGesturesPrefs", NULL);
-            if (url) {
-                openURL(url, NO);
-                CFRelease(url);
-                MGLog(@"打开设置面板 (prefs:root=MyGesturesPrefs)");
+    Class reqCls = objc_getClass("FBSystemServiceOpenApplicationRequest");
+    Class svcCls = objc_getClass("FBSOpenApplicationService");
+    if (reqCls && svcCls) {
+        id req = nil;
+        SEL ib = sel_registerName("initWithBundleId:");
+        if ([reqCls instancesRespondToSelector:ib]) {
+            id a = ((id (*)(id, SEL))objc_msgSend)(reqCls, sel_registerName("alloc"));
+            req = ((id (*)(id, SEL, id))objc_msgSend)(a, ib, @"com.apple.Preferences");
+        }
+        if (req) {
+            SEL st = sel_registerName("setTrusted:");
+            if ([req respondsToSelector:st])
+                ((void (*)(id, SEL, BOOL))objc_msgSend)(req, st, YES);
+            id svc = nil;
+            SEL si = sel_registerName("sharedInstance");
+            if ([svcCls respondsToSelector:si])
+                svc = ((id (*)(id, SEL))objc_msgSend)(svcCls, si);
+            if (!svc) {
+                id a = ((id (*)(id, SEL))objc_msgSend)(svcCls, sel_registerName("alloc"));
+                svc = ((id (*)(id, SEL))objc_msgSend)(a, sel_registerName("init"));
+            }
+            SEL oa = sel_registerName("openApplication:withOptions:completion:");
+            if (svc && [svc respondsToSelector:oa]) {
+                ((void (*)(id, SEL, id, id, id))objc_msgSend)(svc, oa, req, nil, nil);
+                MGLog(@"打开设置面板 (FBSOpenApplicationService)");
                 return;
             }
         }
     }
-    MGLog(@"打开设置面板失败: SBSOpenSensitiveURLWithOptions 不可用");
+    MGLog(@"打开设置面板失败: FBSOpenApplicationService 不可用");
 }
 
 /* ===== 控制中心类动作 (全部带多类/多选择器兜底, 找不到就记日志放弃) ===== */
@@ -332,34 +358,64 @@ static void MGToggleLowPower(void)
                     @"低电量模式");
 }
 
+// 媒体命令: MediaRemote (SB 进程内确认存在); 命令值: 2=播放暂停 4=下一首 5=上一首
+static void MGMediaCommand(int cmd, NSString *label)
+{
+    void *h = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_LAZY);
+    if (h) {
+        void (*fn)(int, id) = (void (*)(int, id))dlsym(h, "MRMediaRemoteSendCommand");
+        if (fn) {
+            fn(cmd, nil);
+            MGLog(@"%@ 成功 (MRMediaRemoteSendCommand %d)", label, cmd);
+            return;
+        }
+    }
+    MGLog(@"%@ 失败: MediaRemote 不可用", label);
+}
+
 static void MGTogglePlayPause(void)
 {
-    MGInvokeFirst(@[@"SBMediaController"], @[@"togglePlayPause", @"playPause"], @"播放/暂停");
+    Class c = objc_getClass("SBMediaController");
+    if (c) {
+        id inst = ((id (*)(id, SEL))objc_msgSend)(c, sel_registerName("sharedInstance"));
+        SEL s = sel_registerName("togglePlayPauseForEventSource:"); // 16.6 实测存在
+        if (inst && [inst respondsToSelector:s]) {
+            ((void (*)(id, SEL, id))objc_msgSend)(inst, s, nil);
+            MGLog(@"播放/暂停 成功 (SBMediaController togglePlayPauseForEventSource:)");
+            return;
+        }
+    }
+    MGMediaCommand(2, @"播放/暂停");
 }
 
 static void MGNextTrack(void)
 {
-    MGInvokeFirst(@[@"SBMediaController"], @[@"nextTrack", @"skipNextTrack"], @"下一首");
+    MGMediaCommand(4, @"下一首");
 }
 
 static void MGPrevTrack(void)
 {
-    MGInvokeFirst(@[@"SBMediaController"], @[@"previousTrack", @"skipPreviousTrack"], @"上一首");
+    MGMediaCommand(5, @"上一首");
 }
 
 static void MGHaptic(void)
 {
     if (!MGPrefBool(@"hapticsEnabled", YES)) return;
+    // 主: 系统震动 4095 (AudioServices, SpringBoard 内最稳); 备: 触觉引擎 (SB 内可能无声反馈)
+    AudioServicesPlaySystemSound(4095);
     if (![NSThread isMainThread]) {
-        dispatch_async(dispatch_get_main_queue(), ^{ MGHaptic(); });
+        dispatch_async(dispatch_get_main_queue(), ^{
+            @try {
+                UIImpactFeedbackGenerator *g = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+                [g impactOccurred];
+            } @catch (NSException *e) {}
+        });
         return;
     }
     @try {
         UIImpactFeedbackGenerator *g = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
         [g impactOccurred];
-    } @catch (NSException *e) {
-        MGLog(@"震动失败: %@", e);
-    }
+    } @catch (NSException *e) {}
 }
 
 static void MGPerformInSpringBoard(NSString *action)
