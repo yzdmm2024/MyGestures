@@ -30,6 +30,13 @@ NSString *MGActionTitle(NSString *act)
         @"respring":      @"Respring注销",
         @"home":          @"返回主屏幕",
         @"settingspanel": @"打开本工具设置面板",
+        @"wifi":          @"WiFi开关",
+        @"bluetooth":     @"蓝牙开关",
+        @"airplane":      @"飞行模式",
+        @"lowpower":      @"低电量模式",
+        @"playpause":     @"播放/暂停音乐",
+        @"nexttrack":     @"下一首",
+        @"prevtrack":     @"上一首",
     };
     return map[act] ?: act;
 }
