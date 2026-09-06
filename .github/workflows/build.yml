@@ -1,46 +1,38 @@
+# ============ CI：rootless 构建出 deb ============
+# 照「系统-设置出现面板菜单的方法/模板」已验证写法（键盘下方状态 build.yml 同款）：
+# macos runner + theos/sdks 的 iPhoneOS14.5.sdk（新 Xcode SDK 无私有框架 tbd，链不了 Preferences）
 name: Build MyGestures deb
 
 on:
   push:
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: macos-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y bash curl sudo fakeroot rsync git perl xz-utils unzip
+      - uses: actions/checkout@v4
 
       - name: Install Theos
-        run: bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)"
-
-      - name: Ensure iPhoneOS 16.5 SDK
         run: |
-          if [ ! -d "$HOME/theos/sdks/iPhoneOS16.5.sdk" ]; then
-            echo "[*] sparse-clone iPhoneOS16.5.sdk"
-            TMP=$(mktemp -d)
-            git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git "$TMP/sdks"
-            cd "$TMP/sdks"
-            git sparse-checkout set iPhoneOS16.5.sdk
-            mkdir -p "$HOME/theos/sdks"
-            cp -R iPhoneOS16.5.sdk "$HOME/theos/sdks/"
-          else
-            echo "[*] SDK 16.5 already present"
-          fi
+          brew install ldid xz 2>/dev/null || true
+          sudo mkdir -p /opt/theos
+          sudo chown $(whoami) /opt/theos
+          git clone --recursive https://github.com/theos/theos.git /opt/theos
+          rm -rf /opt/theos/sdks
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git /opt/theos/sdks
+          cd /opt/theos/sdks && git sparse-checkout set iPhoneOS14.5.sdk
 
-      - name: Build rootless deb
+      - name: Build package (rootless)
         run: |
-          export THEOS="$HOME/theos"
-          export THEOS_PACKAGE_SCHEME=rootless
+          export THEOS=/opt/theos
+          make clean 2>/dev/null || true
           make package FINALPACKAGE=1
 
-      - name: Upload deb
+      - name: Upload deb artifact
         uses: actions/upload-artifact@v4
         with:
           name: MyGestures-deb
           path: packages/*.deb
+          if-no-files-found: error

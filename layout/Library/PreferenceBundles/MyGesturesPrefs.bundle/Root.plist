@@ -1,18 +1,26 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
+<!-- 手放位置：layout/Library/PreferenceBundles/MyGesturesPrefs.bundle/Root.plist（坑D）
+     title 带版本号：真机上凭标题确认装上了新版 -->
 <dict>
 	<key>title</key>
-	<string>我的手势</string>
+	<string>我的手势 0.0.2</string>
 	<key>items</key>
 	<array>
 		<dict>
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
-			<string>状态栏点按手势</string>
+			<string>怎么用</string>
 			<key>footerText</key>
-			<string>在屏幕最顶部（时间/电量那一栏）操作，任何界面都有效。三击有 0.32 秒合并等待，属正常现象。</string>
+			<string>在屏幕最顶部（时间/电量那一小条）做手势：点一下、连点两下、连点三下，或贴着顶边左右横滑。任何界面都有效，包括锁屏后。三击有 0.32 秒合并等待，属正常现象。</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>状态栏点按手势</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -164,11 +172,12 @@
 		</dict>
 		<dict>
 			<key>cell</key>
-			<string>PSGroupCell</string>
+			<string>PSGroupCell</key>
+			<string></string>
 			<key>label</key>
 			<string>说明</string>
 			<key>footerText</key>
-			<string>MyGestures 0.0.1 · 适用于 iOS 16.x rootless 越狱（Relaxin/Dopamine）。修改设置后立即生效，无需注销。</string>
+			<string>MyGestures 0.0.2 · 适用于 iOS 16.x rootless 越狱（Relaxin/Dopamine）。修改设置后立即生效，无需注销。</string>
 		</dict>
 	</array>
 </dict>

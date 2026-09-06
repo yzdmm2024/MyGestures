@@ -1,0 +1,5 @@
+packages/
+packages_ci/
+*.deb
+theos/
+.obj/

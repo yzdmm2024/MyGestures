@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!-- 入口：设置 → 我的手势。文件名纯 ASCII（坑C 相关）。
+     坑C：entry.bundle 必须 = PreferenceBundles 下目录名去掉 .bundle 后缀，一字不差，
+          写错则设置里完全没有入口（静默失败）。 -->
+<dict>
+	<key>entry</key>
+	<dict>
+		<key>bundle</key>
+		<string>MyGesturesPrefs</string>
+		<key>cell</key>
+		<string>PSLinkCell</string>
+		<key>detail</key>
+		<string>MGSettingsController</string>
+		<key>isController</key>
+		<true/>
+		<key>label</key>
+		<string>我的手势</string>
+	</dict>
+</dict>
+</plist>

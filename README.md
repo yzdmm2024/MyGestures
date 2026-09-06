@@ -1,114 +1,78 @@
-# MyGestures —— 我的 gestures（状态栏手势插件）
+# MyGestures —— 我的手势（状态栏手势插件）
 
 专为 **iPhone 12 Pro / iOS 16.6.1 / Relaxin（rootless 无根越狱）** 编写的状态栏手势插件。
+v0.0.2 起设置面板改用 PreferenceBundle + PSListController 方案（照
+`系统-设置出现面板菜单的方法` 实战文档，已修全部 7 个坑）。
 
-## 功能
+## 怎么用（装好后看这里）
 
-在**屏幕最顶部的状态栏区域**（时间、电量那一栏）做手势，**任何界面都有效**（包括锁屏界面、第三方 App 内）：
+### 1. 打开设置面板
 
-| 手势 | 默认动作 |
-|---|---|
-| 单击状态栏 | 无（默认关闭，避免误触） |
-| 双击状态栏 | 锁屏 |
-| 三击状态栏 | 截屏 |
-| 状态栏左滑 | 手电筒开关 |
-| 状态栏右滑 | 无（默认关闭） |
+> **设置 → 我的手势**（就在「设置」主列表里，和"通用""辅助功能"并列）
 
-每个手势都可以在设置里换成：`无动作 / 锁屏 / 截屏 / 注销(Respring) / 手电筒开关`。
+标题显示 **「我的手势 0.0.2」** —— 凭版本号确认装上新版。装完 deb 后需注销一次（安装包会自动注销）。
 
-安装后到 **设置 → 我的手势** 里修改，改完立即生效，不用注销。
+### 2. 面板里能设置什么
+
+5 个手势各自可绑定一个动作，点进去选即可，**改完立即生效，不用注销**：
+
+| 手势 | 怎么做 | 默认动作 |
+|---|---|---|
+| 单击状态栏 | 在屏幕最顶上点一下 | 无（默认关，防误触） |
+| 双击状态栏 | 快速连点两下（间隔 < 0.32 秒） | **锁屏** |
+| 三击状态栏 | 快速连点三下 | **截屏** |
+| 状态栏左滑 | 贴着顶边向左横滑 | **手电筒开关** |
+| 状态栏右滑 | 贴着顶边向右横滑 | 无 |
+
+动作可选：`无动作 / 锁屏 / 截屏 / 注销（Respring） / 手电筒开关`。
+
+### 3. 在哪做手势
+
+**屏幕最顶部的状态栏**（时间、电量那一小条，约 60pt 高），**任何界面都有效**——
+主界面、锁屏后、微信 Safari 等任意 App 里都可以。
+
+### 4. 不影响正常操作
+
+插件只"偷看"触摸、不拦截：下拉通知中心、下拉搜索、点状态栏回顶部（Safari/微信）等都和原来一样。
 
 ## 目录结构
 
 ```
 手势插件/
-├── Makefile              # Theos 构建脚本（rootless 打包）
-├── control               # deb 包信息
-├── Tweak.x               # ★核心源码：手势识别 + 动作执行
-├── MyGestures.plist      # 注入过滤器（注入所有 UIKit 进程）
-├── Prefs/
-│   └── MyGestures.plist  # 设置面板（PreferenceLoader）
-├── build.sh              # 一键编译脚本（WSL/Linux/Mac 用）
-└── README.md             # 本文件
+├── Makefile                          # tweak + 面板 bundle 双目标构建（含坑E/F/G修复）
+├── control                           # deb 信息（0.0.2）
+├── Tweak.x                           # ★手势识别 + 动作执行（CFPreferences 读设置）
+├── MyGestures.plist                  # 注入过滤器（项目根目录，坑A）
+├── Preferences/MGSettingsController.m# 面板主控制器（PSListController）
+├── layout/
+│   ├── DEBIAN/preinst|postinst       # 安装脚本（清理旧入口 / 自动注销）
+│   └── Library/
+│       ├── PreferenceLoader/Preferences/MyGesturesPrefs.plist   # 设置入口（坑C）
+│       └── PreferenceBundles/MyGesturesPrefs.bundle/
+│           ├── Info.plist            # 面板包描述（坑D）
+│           └── Root.plist            # 面板内容（标题带版本号）
+├── .github/workflows/build.yml       # CI 云编译（macos + 14.5 SDK）
+└── README.md
 ```
 
-## 怎么编译出 deb
-
-这台 Windows 电脑上没有装 WSL，无法直接编译 iOS 的 deb。两种办法任选：
-
-### 方法一：装 WSL + Ubuntu（推荐，以后写插件都能用）
-
-以管理员身份打开 PowerShell，执行（装完需要重启电脑一次）：
-
-```powershell
-wsl --install -d Ubuntu
-```
-
-重启后进入 Ubuntu 终端，执行：
+## 改代码后的发布流程（全自动）
 
 ```bash
-cd /mnt/c/Users/10131/Desktop/我自己写的插件/手势插件
-bash build.sh
+git add -A && git commit -m "xxx" && git push     # 云端自动编译
+gh run watch                                       # 看构建
+gh run download -n MyGestures-deb -D packages_ci   # 下载 deb
 ```
 
-`build.sh` 会自动装好 Theos（iOS 编译工具链 + SDK）并编译，产出的 deb 在 `packages/` 目录。
+CI 绿后照例验货：deb 里 data.tar 应有 6 个文件
+（dylib + filter + 入口 plist + bundle 的 Info/Root/可执行），bundle 可执行是 arm64+arm64e 双切片。
 
-### 方法二：有 Mac 或 Linux 机器
+## 排错（对应实战文档的症状表）
 
-把整个 `手势插件` 文件夹拷过去，同样执行：
-
-```bash
-bash build.sh
-```
-
-### 方法三：GitHub 云编译（不用装任何环境）
-
-文件夹里已带 `.github/workflows/build.yml`：
-
-1. 在 GitHub 建一个仓库（免费账号即可），把整个 `手势插件` 文件夹推上去；
-2. 推送后 Actions 会自动开始编译；
-3. 编译完成后，在仓库页面 **Actions → 最新一次运行 → Artifacts** 下载 `MyGestures-deb`，解压就是 deb。
-
-### 手动编译（已经装好 Theos 的人）
-
-```bash
-export THEOS_PACKAGE_SCHEME=rootless
-make package FINALPACKAGE=1
-```
-
-> ⚠️ 关键点：Relaxin 是 rootless 越狱，**必须**带 `THEOS_PACKAGE_SCHEME=rootless`，
-> 打出来的 deb 才会安装到 `/var/jb` 下。不带这个参数编译出的 deb 装不上。
-
-## 怎么安装
-
-1. 把 `packages/` 里生成的 `com.local.mygestures_0.0.1_iphoneos-arm64.deb` 传到手机（AirDrop / 微信 / 网盘均可）。
-2. 用 **Sileo**（Relaxin 自带）或 Filza 打开 deb → 安装 → 注销。
-3. 到 **设置 → 我的手势** 按需调整手势。
-
-## 工作原理（方便你自己改）
-
-- 插件通过 `com.apple.UIKit` 过滤器注入所有带界面的进程，hook 了 `UIWindow` 的 `sendEvent:`，**只观察触摸、不拦截**，所以不影响系统原有操作（下拉通知中心、Safari 点状态栏回顶部等都正常）。
-- 在 SpringBoard 进程里识别到手势 → 直接执行；在其它 App 里识别到 → 通过 **darwin 通知**转发给 SpringBoard 执行（截屏、锁屏这类系统动作只能在 SpringBoard 里做）。
-- 手势判定参数都在 `Tweak.x` 顶部附近，改起来很直观：
-  - 判定区域高度：`MGStatusZoneHeight()`（状态栏 + 12pt 容差）
-  - 点击合并等待：`touchEnded:` 里的 `0.32` 秒
-  - 滑动判定距离：`45.0` pt
-
-## 想加新动作？
-
-在 `Tweak.x` 里三步：
-
-1. 写一个 `static void MGMyAction(void) { ... }`；
-2. 在 `MGPerformInSpringBoard()` 里加一行 `else if ([action isEqualToString:@"myaction"]) MGMyAction();`
-3. 在 `%ctor` 的观察数组 `@[@"lock", ...]` 里加上 `@"myaction"`；再在 `Prefs/MyGestures.plist` 的每个手势 `validValues`/`validTitles` 里各加一项。
-
-## 排错
-
-- **某个手势没反应**：先确认设置里绑定了动作；双击需两次点击间隔小于 0.32 秒。
-- **锁屏/截屏无效**（不同系统版本私有 API 可能变动）：用电脑 console.app 或手机上的日志工具过滤 `MyGestures`，日志会写明走了哪条路径、失败在哪。锁屏有 `SBUIController lock` + `SBSLockDevice` 双保险，截屏有 `SBScreenShotter` 三种方法名自动尝试。
-- **改了代码重新编译**：再跑一次 `bash build.sh` 即可。
-- **想临时禁用**：设置里把手势全设为"无动作"即可，或卸载插件。
+- **设置里完全没有入口**：入口层问题 → 查 entry 的 `bundle` 字段是否 = `MyGesturesPrefs`（坑C）、preinst 是否清了旧入口。
+- **入口在，点开报「已损坏或丢失必要的资源」**：面板层问题 → 基本是 arm64e 切片（坑F）或没链接 Preferences.framework（坑E）。
+- **手势没反应**：确认面板里绑定了动作；双击间隔要 < 0.32 秒；确认触摸点在状态栏区域内。
+- 日志过滤关键字 `MyGestures`。
 
 ## 免责声明
 
-仅用于自己的设备学习越狱插件开发，私有 API 调用（SBUIController、SBScreenShotter 等）在不同系统版本上可能变化，出问题卸载 deb 即可，不影响越狱本身。
+仅用于自己设备学习越狱插件开发。私有 API（SBUIController、SBScreenShotter 等）随系统版本可能变化，异常时卸载 deb 即可。

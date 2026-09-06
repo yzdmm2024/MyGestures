@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!-- 手放位置：layout/Library/PreferenceBundles/MyGesturesPrefs.bundle/Info.plist（坑D） -->
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>Chinese</string>
+	<key>CFBundleDisplayName</key>
+	<string>我的手势</string>
+	<key>CFBundleExecutable</key>
+	<string>MyGesturesPrefs</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.local.mygestures.prefs</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>我的手势</string>
+	<key>CFBundlePackageType</key>
+	<string>BNDL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.0.2</string>
+	<key>CFBundleVersion</key>
+	<string>0.0.2</string>
+	<key>NSPrincipalClass</key>
+	<string>MGSettingsController</string>
+</dict>
+</plist>

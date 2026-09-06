@@ -30,16 +30,18 @@
 
 /* ========================= 偏好设置 ========================= */
 
-// rootless 越狱的偏好路径是 /var/jb 前缀, 但有的工具仍写旧路径, 两个都尝试
-static NSString *const kPrefPathRootless = @"/var/jb/var/mobile/Library/Preferences/com.local.mygestures.plist";
-static NSString *const kPrefPathLegacy   = @"/var/mobile/Library/Preferences/com.local.mygestures.plist";
-static NSString *const kNotifyPrefix     = @"com.local.mygestures.";
+// 面板 (MyGesturesPrefs) 与 tweak 通过同一个 CFPreferences suite 通信,
+// 设置改动经 cfprefsd 立即对所有进程可见, 改完即生效
+static NSString *const kPrefSuite = @"com.local.mygestures";
+static NSString *const kNotifyPrefix = @"com.local.mygestures.";
 
-static NSDictionary *MGReadPrefs(void)
+static NSString *MGPrefString(NSString *key)
 {
-    NSDictionary *d = [NSDictionary dictionaryWithContentsOfFile:kPrefPathRootless];
-    if (!d) d = [NSDictionary dictionaryWithContentsOfFile:kPrefPathLegacy];
-    return d ?: @{};
+    CFPreferencesAppSynchronize((__bridge CFStringRef)kPrefSuite);
+    CFTypeRef raw = CFPreferencesCopyAppValue((__bridge CFStringRef)key, (__bridge CFStringRef)kPrefSuite);
+    if (!raw) return nil;
+    NSString *v = CFBridgingRelease(raw);
+    return [v isKindOfClass:[NSString class]] ? v : nil;
 }
 
 // 出厂默认动作 (设置面板没保存过时使用)
@@ -53,8 +55,8 @@ static NSString *MGDefaultActionForKey(NSString *key)
 
 static NSString *MGActionForGesture(NSString *key)
 {
-    NSString *v = MGReadPrefs()[key];
-    return ([v isKindOfClass:[NSString class]] && v.length > 0) ? v : MGDefaultActionForKey(key);
+    NSString *v = MGPrefString(key);
+    return (v.length > 0) ? v : MGDefaultActionForKey(key);
 }
 
 static BOOL MGActionEnabled(NSString *action)

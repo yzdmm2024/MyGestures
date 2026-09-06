@@ -1,0 +1,5 @@
+#!/bin/bash
+# 安装前清理 v0.0.1 遗留的静态面板入口（新版改为 PreferenceBundle 方式，入口文件名已变），
+# 避免设置里出现重复/失效入口
+rm -f "/var/jb/Library/PreferenceLoader/Preferences/MyGestures.plist" 2>/dev/null || true
+exit 0
