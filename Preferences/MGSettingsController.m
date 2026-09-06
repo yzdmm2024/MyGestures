@@ -13,6 +13,7 @@
 #define MG_SUITE @"com.local.mygestures"
 
 @class MGBlacklistController;
+@class MGLinksController;
 @class MGPickerSingleTap, MGPickerDoubleTap, MGPickerSwipeLeft;
 @class MGPickerLSingleTap, MGPickerLDoubleTap, MGPickerLSwipeLeft;
 @class MGPickerRSingleTap, MGPickerRDoubleTap, MGPickerRSwipeLeft;
@@ -94,7 +95,7 @@ static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
 - (void)viewWillAppear:(BOOL)animated
 {
     [super viewWillAppear:animated];
-    self.title = @"我的手势 0.1.6";
+    self.title = @"我的手势 0.2.0";
     [self attachDiagramHeader];
 }
 
@@ -111,6 +112,7 @@ static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
     if (!key.length) return nil;
     NSString *v = CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)key, (__bridge CFStringRef)MG_SUITE));
     if (![v isKindOfClass:[NSString class]] || v.length == 0) v = @"none";
+    if ([v hasPrefix:@"link:"]) return [v substringFromIndex:5]; // 预设链接显示链接名称
     return MGActionTitle(v);
 }
 
@@ -162,6 +164,10 @@ static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
         [m addObject:MGSwitch(self, @"手势震动反馈", @"hapticsEnabled")];
         [m addObject:MGSlider(self, @"双击识别间隔(秒)", @"tapInterval")];
         [m addObject:MGGroup(self, @"应用管理", nil)];
+        PSSpecifier *lk = MGNewSpec(self, @"我的链接", self, NULL, NULL,
+            NSClassFromString(@"MGLinksController"), PSLinkCell);
+        [lk setProperty:NSClassFromString(@"MGLinksController") forKey:@"detail"];
+        [m addObject:lk];
         PSSpecifier *bl = MGNewSpec(self, @"App黑名单", self, NULL, NULL,
             NSClassFromString(@"MGBlacklistController"), PSLinkCell);
         // 双保险: detail 同时写进属性, 保证跳转子页面

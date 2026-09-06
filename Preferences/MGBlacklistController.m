@@ -54,14 +54,24 @@ static NSString *MGAppName(id app)
         [g setProperty:@"开关打开 = 加入黑名单，该 App 内全部状态栏手势失效。默认全部关闭（都可用）。\n主界面（SpringBoard）不受黑名单影响。" forKey:@"footerText"];
         [m addObject:g];
 
-        // 枚举已安装应用: LSApplicationWorkspace allInstalledApps
+        // 枚举已安装应用: LSApplicationWorkspace (16.6 方法名为 allInstalledApplications)
         NSMutableArray *rows = [NSMutableArray array];
         @try {
             Class wsClass = objc_getClass("LSApplicationWorkspace");
             if (wsClass) {
                 id ws = ((id (*)(id, SEL))objc_msgSend)(wsClass, @selector(defaultWorkspace));
-                NSArray *apps = ws ? ((NSArray *(*)(id, SEL))objc_msgSend)(ws, @selector(allInstalledApps)) : nil;
-                for (id app in apps) {
+                NSArray *apps = nil;
+                if (ws) {
+                    // 16.6: allInstalledApplications; 老系统名 allInstalledApps 一并兜底
+                    for (NSString *selName in @[@"allInstalledApplications", @"allInstalledApps", @"installedApps"]) {
+                        SEL s = NSSelectorFromString(selName);
+                        if ([ws respondsToSelector:s]) {
+                            apps = ((NSArray *(*)(id, SEL))objc_msgSend)(ws, s);
+                            if (apps.count > 0) break;
+                        }
+                    }
+                }
+                for (id app in apps ?: @[]) {
                     @try {
                         NSString *bid = [app respondsToSelector:@selector(bundleIdentifier)] ? [app bundleIdentifier] : nil;
                         // 显示名缺失时用包名兜底, 不再丢弃 (修复黑名单列表不全)
