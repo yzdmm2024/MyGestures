@@ -436,6 +436,7 @@ static void MGAppSwitcher(void)
 }
 
 // 0.4.0 新增: 相机 / 无线局域网设置页 / 蜂窝网络设置页 (全部走已验证的 URL 通路)
+static void MGDispatchAction(NSString *action); // 前置声明(run 回环用)
 static void MGOpenCamera(void)   { MGOpenURLString(@"camera://"); }
 static void MGOpenWLAN(void)     { MGOpenURLString(@"prefs:root=WIFI"); }
 static void MGOpenCellular(void) { MGOpenURLString(@"prefs:root=MOBILE_DATA_SETTINGS_ID"); }
