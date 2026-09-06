@@ -532,7 +532,8 @@ static void MGOpenURLString(NSString *urlString)
 
 #pragma mark - 应用抽屉 (0.5.0): 左滑弹出应用面板, 点图标直接打开
 
-static void MGHaptic(void);   // 前置声明(实现在媒体区)
+static void MGHaptic(void);       // 前置声明(实现在媒体区)
+static void MGDrawerDismiss(void); // 前置声明(定义在抽屉区末尾)
 static BOOL MGLaunchApp(NSString *bid); // 前置声明
 
 // tweak 侧应用枚举 (与面板同一过滤规则: 预装+沙盒, 排除无图标系统级程序)
