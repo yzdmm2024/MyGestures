@@ -18,6 +18,19 @@ static id MGNewSpec(id ctrl, NSString *name, id target, SEL set, SEL get, id det
     return msg(ctrl, sel, name, target, set, get, detail, cell, 0);
 }
 
+// 应用显示名: 14.5 SDK 头文件未声明 localizedDisplayName, 运行时按候选方法名取
+static NSString *MGAppName(id app)
+{
+    for (NSString *selName in @[@"localizedDisplayName", @"localizedName"]) {
+        SEL s = NSSelectorFromString(selName);
+        if ([app respondsToSelector:s]) {
+            NSString *n = ((NSString *(*)(id, SEL))objc_msgSend)(app, s);
+            if (n.length) return n;
+        }
+    }
+    return nil;
+}
+
 @interface MGBlacklistController : PSListController
 @end
 
@@ -49,7 +62,7 @@ static id MGNewSpec(id ctrl, NSString *name, id target, SEL set, SEL get, id det
                 for (id app in apps) {
                     @try {
                         NSString *bid = [app respondsToSelector:@selector(bundleIdentifier)] ? [app bundleIdentifier] : nil;
-                        NSString *name = [app respondsToSelector:@selector(localizedDisplayName)] ? [app localizedDisplayName] : nil;
+                        NSString *name = bid.length ? MGAppName(app) : nil;
                         if (bid.length && name.length) [rows addObject:@[name, bid]];
                     } @catch (NSException *e) { /* 跳过异常项 */ }
                 }
