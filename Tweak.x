@@ -299,16 +299,54 @@ static void MGInvokeFirst(NSArray *classNames, NSArray *sels, NSString *label)
     MGLog(@"%@ 失败: 没有可用的类/选择器", label);
 }
 
+// WiFi 开关: WiFiKit WFControlCenterStateMonitor performAction: (控制中心同款动作, 真机实测调用成功)
 static void MGToggleWiFi(void)
 {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        void *h = dlopen("/System/Library/PrivateFrameworks/WiFiKit.framework/WiFiKit", RTLD_LAZY);
+    });
+    Class c = objc_getClass("WFControlCenterStateMonitor");
+    if (c) {
+        id mon = ((id (*)(id, SEL))objc_msgSend)([c alloc], sel_registerName("init"));
+        if (mon) {
+            [mon performAction:nil];
+            MGLog(@"WiFi开关 成功 (WFControlCenterStateMonitor performAction)");
+            return;
+        }
+    }
+    // 兜底: SBWiFiManager
     MGToggleSetting(@[@"SBWiFiManager"],
                     @[@"wifiEnabled", @"isWiFiEnabled"],
                     @[@"setWiFiEnabled:", @"setWiFiPowered:"],
                     @"WiFi开关");
 }
 
+// 蓝牙开关: BluetoothManager bluetoothStateActionWithCompletion: (真机实测状态真实切换 3→2)
 static void MGToggleBluetooth(void)
 {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        void *h = dlopen("/System/Library/PrivateFrameworks/BluetoothManager.framework/BluetoothManager", RTLD_LAZY);
+    });
+    Class c = objc_getClass("BluetoothManager");
+    if (c) {
+        id bm = ((id (*)(id, SEL))objc_msgSend)(c, sel_registerName("sharedInstance"));
+        if (bm) {
+            SEL s1 = sel_registerName("bluetoothStateActionWithCompletion:");
+            if ([bm respondsToSelector:s1]) {
+                ((void (*)(id, SEL, id))objc_msgSend)(bm, s1, nil);
+                MGLog(@"蓝牙开关 成功 (bluetoothStateActionWithCompletion:)");
+                return;
+            }
+            SEL s2 = sel_registerName("bluetoothStateAction");
+            if ([bm respondsToSelector:s2]) {
+                ((void (*)(id, SEL))objc_msgSend)(bm, s2);
+                MGLog(@"蓝牙开关 成功 (bluetoothStateAction)");
+                return;
+            }
+        }
+    }
     MGToggleSetting(@[@"SBBluetoothManager", @"SBBluetoothPowerController"],
                     @[@"bluetoothEnabled", @"isBluetoothEnabled", @"enabled"],
                     @[@"setBluetoothEnabled:", @"setEnabled:"],
