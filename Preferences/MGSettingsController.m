@@ -128,20 +128,20 @@ static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
         if (!splitOn) {
             // ===== 模式1: 左右耳朵共用 =====
             [m addObject:MGGroup(self, @"公共手势（左右耳朵共用）", @"点击任意一行进入动作选择页，点选后立即生效并返回。\n手势选「无」代表单独禁用该手势，无需关闭整个插件。\n长按、三击、上滑、下滑始终交给系统，不占用。")];
-            [m addObject:MGLink(self, @"单击", @"singleTap", [MGPickerSingleTap class])];
-            [m addObject:MGLink(self, @"双击", @"doubleTap", [MGPickerDoubleTap class])];
-            [m addObject:MGLink(self, @"左滑", @"swipeLeft", [MGPickerSwipeLeft class])];
+            [m addObject:MGLink(self, @"单击", @"singleTap", NSClassFromString(@"MGPickerSingleTap"))];
+            [m addObject:MGLink(self, @"双击", @"doubleTap", NSClassFromString(@"MGPickerDoubleTap"))];
+            [m addObject:MGLink(self, @"左滑", @"swipeLeft", NSClassFromString(@"MGPickerSwipeLeft"))];
         } else {
             // ===== 模式2: 左右分段独立 =====
             [m addObject:MGGroup(self, @"状态栏‑左段｜时间侧", @"刘海/灵动岛左侧的耳朵区域，只在此区域内生效。")];
-            [m addObject:MGLink(self, @"单击", @"left_singleTap", [MGPickerLSingleTap class])];
-            [m addObject:MGLink(self, @"双击", @"left_doubleTap", [MGPickerLDoubleTap class])];
-            [m addObject:MGLink(self, @"左滑", @"left_swipeLeft", [MGPickerLSwipeLeft class])];
+            [m addObject:MGLink(self, @"单击", @"left_singleTap", NSClassFromString(@"MGPickerLSingleTap"))];
+            [m addObject:MGLink(self, @"双击", @"left_doubleTap", NSClassFromString(@"MGPickerLDoubleTap"))];
+            [m addObject:MGLink(self, @"左滑", @"left_swipeLeft", NSClassFromString(@"MGPickerLSwipeLeft"))];
 
             [m addObject:MGGroup(self, @"状态栏‑右段｜电池信号侧", @"刘海/灵动岛右侧的耳朵区域（信号/Wi‑Fi/电池），只在此区域内生效。")];
-            [m addObject:MGLink(self, @"单击", @"right_singleTap", [MGPickerRSingleTap class])];
-            [m addObject:MGLink(self, @"双击", @"right_doubleTap", [MGPickerRDoubleTap class])];
-            [m addObject:MGLink(self, @"左滑", @"right_swipeLeft", [MGPickerRSwipeLeft class])];
+            [m addObject:MGLink(self, @"单击", @"right_singleTap", NSClassFromString(@"MGPickerRSingleTap"))];
+            [m addObject:MGLink(self, @"双击", @"right_doubleTap", NSClassFromString(@"MGPickerRDoubleTap"))];
+            [m addObject:MGLink(self, @"左滑", @"right_swipeLeft", NSClassFromString(@"MGPickerRSwipeLeft"))];
         }
 
         // ===== 全局设置 =====
