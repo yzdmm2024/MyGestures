@@ -23,6 +23,7 @@
 #import <AVFoundation/AVFoundation.h>
 #import <QuartzCore/QuartzCore.h>
 #import <AudioToolbox/AudioToolbox.h>
+#import <CoreHaptics/CoreHaptics.h>
 #import <dispatch/dispatch.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
@@ -470,24 +471,37 @@ static void MGRunLink(NSString *name)
     MGLog(@"打开链接失败: 找不到预设「%@」(可在 我的链接 里检查)", name);
 }
 
+// 震动: CoreHaptics 引擎 (连点器项目真机验证过的方案) + AudioServices 兜底
+static CHHapticEngine *mgHapticEngine = nil;
+
+static void MGInitHapticEngine(void)
+{
+    if (mgHapticEngine) return;
+    if (![CHHapticEngine capabilitiesForHardware].supportsHaptics) return;
+    NSError *err = nil;
+    mgHapticEngine = [[CHHapticEngine alloc] initAndReturnError:&err];
+    if (err) { mgHapticEngine = nil; return; }
+    [mgHapticEngine startWithCompletionHandler:nil];
+}
+
 static void MGHaptic(void)
 {
     if (!MGPrefBool(@"hapticsEnabled", YES)) return;
-    // 主: 系统震动 4095 (AudioServices, SpringBoard 内最稳); 备: 触觉引擎 (SB 内可能无声反馈)
-    AudioServicesPlaySystemSound(4095);
-    if (![NSThread isMainThread]) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            @try {
-                UIImpactFeedbackGenerator *g = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
-                [g impactOccurred];
-            } @catch (NSException *e) {}
-        });
-        return;
+    MGInitHapticEngine();
+    if (mgHapticEngine) {
+        @try {
+            CHHapticEventParameter *intensity = [[CHHapticEventParameter alloc] initWithParameterID:CHHapticEventParameterIDHapticIntensity value:1.0];
+            CHHapticEventParameter *sharpness = [[CHHapticEventParameter alloc] initWithParameterID:CHHapticEventParameterIDHapticSharpness value:0.6];
+            CHHapticEvent *event = [[CHHapticEvent alloc] initWithEventType:CHHapticEventTypeHapticTransient parameters:@[intensity, sharpness] relativeTime:0];
+            NSError *perr = nil;
+            CHHapticPattern *pattern = [[CHHapticPattern alloc] initWithEvents:@[event] parameters:@[] error:&perr];
+            if (!perr) {
+                id<CHHapticPatternPlayer> player = [mgHapticEngine createPlayerWithPattern:pattern error:&perr];
+                if (!perr) [player startAtTime:0 error:nil];
+            }
+        } @catch (NSException *e) { MGLog(@"CoreHaptics 异常: %@", e); }
     }
-    @try {
-        UIImpactFeedbackGenerator *g = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
-        [g impactOccurred];
-    } @catch (NSException *e) {}
+    AudioServicesPlaySystemSound(4095); // 双保险
 }
 
 static void MGPerformInSpringBoard(NSString *action)
