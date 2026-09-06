@@ -1,7 +1,7 @@
-// MyGestures 动作选择子页面 v0.1.3
-// 主页面每个手势行 (PSLinkCell) 推入对应子类; 子页面每行一个动作 (PSButtonCell),
-// 点选立即写入 CFPreferences 并自动返回上一页; 右侧当前值由主页面 get: 刷新
-// 注: 构造走 PSSpecifier preferenceSpecifierNamed: (真机 frida 反射实锤的唯一可用选择器)
+// MyGestures 动作选择子页面 v0.1.5
+// 主页面每个手势行 (PSLinkCell) 推入对应子类; 子页面每行一个 PSSwitchCell (真机验证可交互),
+// 单选逻辑由本控制器实现: 打开一项 → 写入手势键并刷新 (其他项自动变关); 关掉当前项 → 变「无」
+// 注: PSButtonCell 在真机上点按不触发, PSListItemCell 点按无响应, 均已弃用
 #import <Preferences/Preferences.h>
 #import <UIKit/UIKit.h>
 #import <objc/message.h>
@@ -52,7 +52,8 @@ static NSArray *MGActsSwipe(void)  { return @[@"none", @"lock", @"screenshot", @
 + (NSString *)mgKey;
 + (NSString *)mgTitle;
 + (NSArray *)mgActions;
-- (void)mgPick:(PSSpecifier *)spec;
+- (id)mgSwitchValue:(PSSpecifier *)spec;
+- (void)mgPickSwitch:(id)value specifier:(PSSpecifier *)spec;
 @end
 
 @implementation MGActionPickerController
@@ -70,12 +71,17 @@ static NSArray *MGActsSwipe(void)  { return @[@"none", @"lock", @"screenshot", @
 
         PSSpecifier *g = MGNewSpec(self, @"选择动作", nil, NULL, NULL, nil, PSGroupCell);
         [g setProperty:@"选择动作" forKey:@"label"];
-        [g setProperty:@"点选任意动作立即生效并自动返回上一页；主页面右侧会同步显示当前选中项。" forKey:@"footerText"];
+        [g setProperty:@"单选：打开一项即选中（其余自动关闭），立即生效；把当前项关掉 = 改为「无」。返回后主页面右侧会显示当前选中项。" forKey:@"footerText"];
         [m addObject:g];
+
+        // 当前选中的动作
+        NSString *key = [[self class] mgKey];
+        NSString *cur = CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)key, (__bridge CFStringRef)MG_SUITE));
+        if (![cur isKindOfClass:[NSString class]] || cur.length == 0) cur = @"none";
 
         for (NSString *act in [[self class] mgActions]) {
             PSSpecifier *s = MGNewSpec(self, MGActionTitle(act), self,
-                @selector(mgPick:), NULL, nil, PSButtonCell);
+                @selector(mgPickSwitch:specifier:), @selector(mgSwitchValue:), nil, PSSwitchCell);
             [s setProperty:act forKey:@"mgAction"];
             [m addObject:s];
         }
@@ -85,17 +91,26 @@ static NSArray *MGActsSwipe(void)  { return @[@"none", @"lock", @"screenshot", @
     return _specifiers;
 }
 
-- (void)mgPick:(PSSpecifier *)spec
+// 开关状态: 当前动作 == 本行动作
+- (id)mgSwitchValue:(PSSpecifier *)spec
 {
-    if (!spec) return;
+    NSString *key = [[self class] mgKey];
+    NSString *cur = CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)key, (__bridge CFStringRef)MG_SUITE));
+    if (![cur isKindOfClass:[NSString class]] || cur.length == 0) cur = @"none";
+    return @([cur isEqualToString:[spec propertyForKey:@"mgAction"]]);
+}
+
+// 单选: 打开一项写入手势键并刷新(其余自动关闭); 关掉当前项 → 变「无」
+- (void)mgPickSwitch:(id)value specifier:(PSSpecifier *)spec
+{
     NSString *act = [spec propertyForKey:@"mgAction"];
     if (!act.length) return;
     NSString *key = [[self class] mgKey];
-    CFPreferencesSetAppValue((__bridge CFStringRef)key, (__bridge CFTypeRef)act, (__bridge CFStringRef)MG_SUITE);
+    NSString *newVal = [value boolValue] ? act : @"none";
+    CFPreferencesSetAppValue((__bridge CFStringRef)key, (__bridge CFTypeRef)newVal, (__bridge CFStringRef)MG_SUITE);
     CFPreferencesAppSynchronize((__bridge CFStringRef)MG_SUITE);
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self.navigationController popViewControllerAnimated:YES];
-    });
+    _specifiers = nil;
+    [self reloadSpecifiers]; // 刷新所有行的开关状态 (单选互斥)
 }
 
 @end
