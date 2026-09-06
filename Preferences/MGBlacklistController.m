@@ -64,7 +64,8 @@ static NSString *MGAppName(id app)
                 for (id app in apps) {
                     @try {
                         NSString *bid = [app respondsToSelector:@selector(bundleIdentifier)] ? [app bundleIdentifier] : nil;
-                        NSString *name = bid.length ? MGAppName(app) : nil;
+                        // 显示名缺失时用包名兜底, 不再丢弃 (修复黑名单列表不全)
+                        NSString *name = bid.length ? (MGAppName(app) ?: bid) : nil;
                         if (bid.length && name.length) [rows addObject:@[name, bid]];
                     } @catch (NSException *e) { /* 跳过异常项 */ }
                 }
