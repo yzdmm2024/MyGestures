@@ -78,7 +78,11 @@ static PSSpecifier *MGList(id ctrl, NSString *name, NSString *key, NSArray *valu
     [s setProperty:key forKey:@"key"];
     NSMutableArray *titles = [NSMutableArray array];
     for (NSString *v in values) [titles addObject:MGActionTitle(v)];
-    [s setValues:values titles:titles];
+    // setValues:titles: 运行时存在但头文件未声明, 走 msgSend
+    SEL svSel = NSSelectorFromString(@"setValues:titles:");
+    void (*msgSVT)(id, SEL, NSArray *, NSArray *) =
+        (void (*)(id, SEL, NSArray *, NSArray *))objc_msgSend;
+    msgSVT(s, svSel, values, titles);
     return s;
 }
 
