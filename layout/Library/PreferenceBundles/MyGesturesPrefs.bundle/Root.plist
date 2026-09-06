@@ -5,7 +5,7 @@
      title 带版本号：真机上凭标题确认装上了新版 -->
 <dict>
 	<key>title</key>
-	<string>我的手势 0.0.2</string>
+	<string>我的手势 0.0.3</string>
 	<key>items</key>
 	<array>
 		<dict>
@@ -176,7 +176,7 @@
 			<key>label</key>
 			<string>说明</string>
 			<key>footerText</key>
-			<string>MyGestures 0.0.2 · 适用于 iOS 16.x rootless 越狱（Relaxin/Dopamine）。修改设置后立即生效，无需注销。</string>
+			<string>MyGestures 0.0.3 · 适用于 iOS 16.x rootless 越狱（Relaxin/Dopamine）。修改设置后立即生效，无需注销。</string>
 		</dict>
 	</array>
 </dict>
