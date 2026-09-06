@@ -247,6 +247,106 @@ static void MGOpenPrefsPanel(void)
     MGLog(@"打开设置面板失败: SBSOpenSensitiveURLWithOptions 不可用");
 }
 
+/* ===== 控制中心类动作 (全部带多类/多选择器兜底, 找不到就记日志放弃) ===== */
+
+// 通用布尔开关: 遍历候选类/读选择器取当前值, 用第一个可用的写选择器翻转
+static void MGToggleSetting(NSArray *classNames, NSArray *getters, NSArray *setters, NSString *label)
+{
+    for (NSString *cn in classNames) {
+        Class c = objc_getClass(cn.UTF8String);
+        if (!c) continue;
+        id inst = ((id (*)(id, SEL))objc_msgSend)(c, sel_registerName("sharedInstance"));
+        if (!inst) continue;
+
+        BOOL cur = NO;
+        BOOL haveCur = NO;
+        for (NSString *g in getters) {
+            SEL gs = NSSelectorFromString(g);
+            if ([inst respondsToSelector:gs]) {
+                cur = ((BOOL (*)(id, SEL))objc_msgSend)(inst, gs);
+                haveCur = YES;
+                break;
+            }
+        }
+        for (NSString *sn in setters) {
+            SEL ss = NSSelectorFromString(sn);
+            if ([inst respondsToSelector:ss]) {
+                ((void (*)(id, SEL, BOOL))objc_msgSend)(inst, ss, !cur);
+                MGLog(@"%@ 成功 (%@ %@, 原值=%d)", label, cn, sn, haveCur ? cur : -1);
+                return;
+            }
+        }
+    }
+    MGLog(@"%@ 失败: 没有可用的类/选择器", label);
+}
+
+// 无参方法: 执行第一个可用的
+static void MGInvokeFirst(NSArray *classNames, NSArray *sels, NSString *label)
+{
+    for (NSString *cn in classNames) {
+        Class c = objc_getClass(cn.UTF8String);
+        if (!c) continue;
+        id inst = ((id (*)(id, SEL))objc_msgSend)(c, sel_registerName("sharedInstance"));
+        if (!inst) continue;
+        for (NSString *sn in sels) {
+            SEL s = NSSelectorFromString(sn);
+            if ([inst respondsToSelector:s]) {
+                ((void (*)(id, SEL))objc_msgSend)(inst, s);
+                MGLog(@"%@ 成功 (%@ %@)", label, cn, sn);
+                return;
+            }
+        }
+    }
+    MGLog(@"%@ 失败: 没有可用的类/选择器", label);
+}
+
+static void MGToggleWiFi(void)
+{
+    MGToggleSetting(@[@"SBWiFiManager"],
+                    @[@"wifiEnabled", @"isWiFiEnabled"],
+                    @[@"setWiFiEnabled:", @"setWiFiPowered:"],
+                    @"WiFi开关");
+}
+
+static void MGToggleBluetooth(void)
+{
+    MGToggleSetting(@[@"SBBluetoothManager", @"SBBluetoothPowerController"],
+                    @[@"bluetoothEnabled", @"isBluetoothEnabled", @"enabled"],
+                    @[@"setBluetoothEnabled:", @"setEnabled:"],
+                    @"蓝牙开关");
+}
+
+static void MGToggleAirplane(void)
+{
+    MGToggleSetting(@[@"SBTelephonyManager", @"SBAirplaneModeManager"],
+                    @[@"airplaneMode", @"isInAirplaneMode"],
+                    @[@"setAirplaneMode:"],
+                    @"飞行模式");
+}
+
+static void MGToggleLowPower(void)
+{
+    MGToggleSetting(@[@"SBLowPowerModeManager", @"SBBatteryManager"],
+                    @[@"lowPowerMode", @"isLowPowerModeEnabled", @"lowPowerModeEnabled"],
+                    @[@"setLowPowerMode:", @"setLowPowerModeEnabled:"],
+                    @"低电量模式");
+}
+
+static void MGTogglePlayPause(void)
+{
+    MGInvokeFirst(@[@"SBMediaController"], @[@"togglePlayPause", @"playPause"], @"播放/暂停");
+}
+
+static void MGNextTrack(void)
+{
+    MGInvokeFirst(@[@"SBMediaController"], @[@"nextTrack", @"skipNextTrack"], @"下一首");
+}
+
+static void MGPrevTrack(void)
+{
+    MGInvokeFirst(@[@"SBMediaController"], @[@"previousTrack", @"skipPreviousTrack"], @"上一首");
+}
+
 static void MGHaptic(void)
 {
     if (!MGPrefBool(@"hapticsEnabled", YES)) return;
@@ -270,6 +370,13 @@ static void MGPerformInSpringBoard(NSString *action)
     else if ([action isEqualToString:@"respring"])    { MGHaptic(); MGRespring(); return; }
     else if ([action isEqualToString:@"home"])        MGGoHome();
     else if ([action isEqualToString:@"settingspanel"]) MGOpenPrefsPanel();
+    else if ([action isEqualToString:@"wifi"])        MGToggleWiFi();
+    else if ([action isEqualToString:@"bluetooth"])   MGToggleBluetooth();
+    else if ([action isEqualToString:@"airplane"])    MGToggleAirplane();
+    else if ([action isEqualToString:@"lowpower"])    MGToggleLowPower();
+    else if ([action isEqualToString:@"playpause"])   MGTogglePlayPause();
+    else if ([action isEqualToString:@"nexttrack"])   MGNextTrack();
+    else if ([action isEqualToString:@"prevtrack"])   MGPrevTrack();
     MGHaptic(); // 手势执行成功震动
 }
 
@@ -496,7 +603,8 @@ static BOOL MGAppBlacklisted(void)
     @autoreleasepool {
         if (MGIsSpringBoard()) {
             CFNotificationCenterRef nc = CFNotificationCenterGetDarwinNotifyCenter();
-            for (NSString *a in @[@"lock", @"screenshot", @"respring", @"flashlight", @"home", @"settingspanel"]) {
+            for (NSString *a in @[@"lock", @"screenshot", @"respring", @"flashlight", @"home", @"settingspanel",
+                                  @"wifi", @"bluetooth", @"airplane", @"lowpower", @"playpause", @"nexttrack", @"prevtrack"]) {
                 CFNotificationCenterAddObserver(nc, NULL, MGDarwinCallback,
                     (__bridge CFStringRef)[kNotifyPrefix stringByAppendingString:a],
                     NULL, CFNotificationSuspensionBehaviorCoalesce);
