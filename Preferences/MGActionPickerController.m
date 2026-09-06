@@ -9,6 +9,8 @@
 
 #define MG_SUITE @"com.local.mygestures"
 
+NSArray *MGLinksRead(void); // 在 MGLinksController.m 中实现
+
 static id MGNewSpec(id ctrl, NSString *name, id target, SEL set, SEL get, id detail, NSInteger cell)
 {
     SEL sel = NSSelectorFromString(@"preferenceSpecifierNamed:target:set:get:detail:cell:edit:");
@@ -83,6 +85,31 @@ static NSArray *MGActsSwipe(void)  { return @[@"none", @"lock", @"screenshot", @
             PSSpecifier *s = MGNewSpec(self, MGActionTitle(act), self,
                 @selector(mgPickSwitch:specifier:), @selector(mgSwitchValue:), nil, PSSwitchCell);
             [s setProperty:act forKey:@"mgAction"];
+            [m addObject:s];
+        }
+
+        // ===== 打开链接分组: 列出「我的链接」里的全部预设 (radio 同款单选机制) =====
+        NSArray *links = MGLinksRead();
+        NSMutableArray *linkRows = [NSMutableArray array];
+        for (NSDictionary *d in links) {
+            if ([d isKindOfClass:[NSDictionary class]] &&
+                [d[@"n"] isKindOfClass:[NSString class]] && [d[@"n"] length] > 0 &&
+                [d[@"u"] isKindOfClass:[NSString class]] && [d[@"u"] length] > 0) {
+                [linkRows addObject:d];
+            }
+        }
+        PSSpecifier *lg = MGNewSpec(self, @"打开链接", nil, NULL, NULL, nil, PSGroupCell);
+        [lg setProperty:@"打开链接" forKey:@"label"];
+        [lg setProperty:linkRows.count
+            ? @"点开开关即选中该链接（其余自动关闭）。链接在「我的链接」里维护。"
+            : @"还没有预设链接。返回后进入「我的链接」添加（支持 shortcuts:// 运行快捷指令、weixin:// 等任意 scheme）。"
+            forKey:@"footerText"];
+        [m addObject:lg];
+        for (NSDictionary *d in linkRows) {
+            NSString *value = [@"link:" stringByAppendingString:d[@"n"]];
+            PSSpecifier *s = MGNewSpec(self, d[@"n"], self,
+                @selector(mgPickSwitch:specifier:), @selector(mgSwitchValue:), nil, PSSwitchCell);
+            [s setProperty:value forKey:@"mgAction"];
             [m addObject:s];
         }
 

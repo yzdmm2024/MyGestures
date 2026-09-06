@@ -237,40 +237,10 @@ static void MGGoHome(void)
     MGLog(@"返回主屏幕失败: SBUIController 方法不可用");
 }
 
-// 打开设置面板: SBSOpenSensitiveURLWithOptions 在 SB 进程内不存在 (frida 实锤),
-// 改用 FBSystemServiceOpenApplicationRequest + FBSOpenApplicationService 打开设置
+// 打开设置面板: 直接走已验证安全的 openURL 通路 (prefs: 页面深链不中时也会打开设置根页)
 static void MGOpenPrefsPanel(void)
 {
-    Class reqCls = objc_getClass("FBSystemServiceOpenApplicationRequest");
-    Class svcCls = objc_getClass("FBSOpenApplicationService");
-    if (reqCls && svcCls) {
-        id req = nil;
-        SEL ib = sel_registerName("initWithBundleId:");
-        if ([reqCls instancesRespondToSelector:ib]) {
-            id a = ((id (*)(id, SEL))objc_msgSend)(reqCls, sel_registerName("alloc"));
-            req = ((id (*)(id, SEL, id))objc_msgSend)(a, ib, @"com.apple.Preferences");
-        }
-        if (req) {
-            SEL st = sel_registerName("setTrusted:");
-            if ([req respondsToSelector:st])
-                ((void (*)(id, SEL, BOOL))objc_msgSend)(req, st, YES);
-            id svc = nil;
-            SEL si = sel_registerName("sharedInstance");
-            if ([svcCls respondsToSelector:si])
-                svc = ((id (*)(id, SEL))objc_msgSend)(svcCls, si);
-            if (!svc) {
-                id a = ((id (*)(id, SEL))objc_msgSend)(svcCls, sel_registerName("alloc"));
-                svc = ((id (*)(id, SEL))objc_msgSend)(a, sel_registerName("init"));
-            }
-            SEL oa = sel_registerName("openApplication:withOptions:completion:");
-            if (svc && [svc respondsToSelector:oa]) {
-                ((void (*)(id, SEL, id, id, id))objc_msgSend)(svc, oa, req, nil, nil);
-                MGLog(@"打开设置面板 (FBSOpenApplicationService)");
-                return;
-            }
-        }
-    }
-    MGLog(@"打开设置面板失败: FBSOpenApplicationService 不可用");
+    MGOpenURLString(@"prefs:root=MyGesturesPrefs");
 }
 
 /* ===== 控制中心类动作 (全部带多类/多选择器兜底, 找不到就记日志放弃) ===== */
@@ -398,6 +368,106 @@ static void MGPrevTrack(void)
     MGMediaCommand(5, @"上一首");
 }
 
+/* ===== 0.2.0 新增: 音量 / App切换器 / 链接系统 ===== */
+
+// 音量步进 (AVSystemController, 16.6 实测可调用)
+static void MGVolumeBy(float delta)
+{
+    Class c = objc_getClass("AVSystemController");
+    if (c) {
+        id inst = ((id (*)(id, SEL))objc_msgSend)(c, sel_registerName("sharedAVSystemController"));
+        SEL s = sel_registerName("changeActiveCategoryVolumeBy:");
+        if (inst && [inst respondsToSelector:s]) {
+            @try {
+                ((BOOL (*)(id, SEL, float))objc_msgSend)(inst, s, delta);
+                MGLog(@"音量步进 %f", delta);
+                return;
+            } @catch (NSException *e) { MGLog(@"音量异常: %@", e); }
+        }
+    }
+    MGLog(@"音量失败: AVSystemController 不可用");
+}
+
+static void MGVolUp(void)   { MGVolumeBy(0.0625); }
+static void MGVolDown(void) { MGVolumeBy(-0.0625); }
+
+// 静音: 媒体音量归零 (经典 setVolumeTo:forCategory: 路径)
+static void MGMute(void)
+{
+    Class c = objc_getClass("AVSystemController");
+    if (c) {
+        id inst = ((id (*)(id, SEL))objc_msgSend)(c, sel_registerName("sharedAVSystemController"));
+        if (inst) {
+            NSString *cat = @"Audio/Video";
+            SEL s1 = sel_registerName("setVolumeTo:forCategory:");
+            if ([inst respondsToSelector:s1]) {
+                ((BOOL (*)(id, SEL, float, id))objc_msgSend)(inst, s1, 0.0, cat);
+                MGLog(@"静音成功 (setVolumeTo:forCategory:)");
+                return;
+            }
+            SEL s2 = sel_registerName("setVolume:forCategory:");
+            if ([inst respondsToSelector:s2]) {
+                ((BOOL (*)(id, SEL, float, id))objc_msgSend)(inst, s2, 0.0, cat);
+                MGLog(@"静音成功 (setVolume:forCategory:)");
+                return;
+            }
+        }
+    }
+    MGLog(@"静音失败: AVSystemController 不可用");
+}
+
+// App 切换器: 双击 Home 的内部方法 (16.6 实测存在)
+static void MGAppSwitcher(void)
+{
+    Class c = objc_getClass("SBUIController");
+    if (c) {
+        id inst = ((id (*)(id, SEL))objc_msgSend)(c, sel_registerName("sharedInstance"));
+        SEL s = sel_registerName("handleHomeButtonDoublePressDown");
+        if (inst && [inst respondsToSelector:s]) {
+            ((void (*)(id, SEL))objc_msgSend)(inst, s);
+            MGLog(@"App切换器 成功 (handleHomeButtonDoublePressDown)");
+            return;
+        }
+    }
+    MGLog(@"App切换器失败: SBUIController 不可用");
+}
+
+// 从 SpringBoard 打开 URL (16.6 实测安全不崩的通路)
+static void MGOpenURLString(NSString *urlString)
+{
+    if (urlString.length == 0) { MGLog(@"打开链接失败: 空地址"); return; }
+    NSURL *url = [NSURL URLWithString:urlString];
+    if (!url || !url.scheme)
+        url = [NSURL URLWithString:[@"https://" stringByAppendingString:urlString]]; // 裸域名兜底
+    if (!url) { MGLog(@"打开链接失败: 无效地址 %@", urlString); return; }
+    Class c = objc_getClass("FBSSystemService");
+    if (c) {
+        id svc = ((id (*)(id, SEL))objc_msgSend)(c, sel_registerName("sharedService"));
+        SEL o = sel_registerName("openURL:application:options:clientPort:withResult:");
+        if (svc && [svc respondsToSelector:o]) {
+            ((void (*)(id, SEL, id, id, id, unsigned int, id))objc_msgSend)(svc, o, url, nil, nil, 0, nil);
+            MGLog(@"打开链接成功 (%@)", url);
+            return;
+        }
+    }
+    MGLog(@"打开链接失败: FBSSystemService 不可用");
+}
+
+// 执行预设链接: 按名称查 links 预设表 (数组, 每项 {n:名称, u:网址})
+static void MGRunLink(NSString *name)
+{
+    NSArray *links = CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)@"links", (__bridge CFStringRef)kSuite));
+    if ([links isKindOfClass:[NSArray class]]) {
+        for (NSDictionary *d in links) {
+            if ([d isKindOfClass:[NSDictionary class]] && [name isEqualToString:d[@"n"]]) {
+                NSString *u = d[@"u"];
+                if ([u isKindOfClass:[NSString class]] && u.length > 0) { MGOpenURLString(u); return; }
+            }
+        }
+    }
+    MGLog(@"打开链接失败: 找不到预设「%@」(可在 我的链接 里检查)", name);
+}
+
 static void MGHaptic(void)
 {
     if (!MGPrefBool(@"hapticsEnabled", YES)) return;
@@ -433,6 +503,10 @@ static void MGPerformInSpringBoard(NSString *action)
     else if ([action isEqualToString:@"playpause"])   MGTogglePlayPause();
     else if ([action isEqualToString:@"nexttrack"])   MGNextTrack();
     else if ([action isEqualToString:@"prevtrack"])   MGPrevTrack();
+    else if ([action isEqualToString:@"volup"])       MGVolUp();
+    else if ([action isEqualToString:@"voldown"])     MGVolDown();
+    else if ([action isEqualToString:@"mute"])        MGMute();
+    else if ([action isEqualToString:@"appswitcher"]) MGAppSwitcher();
     MGHaptic(); // 手势执行成功震动
 }
 
@@ -445,6 +519,11 @@ static void MGDarwinCallback(CFNotificationCenterRef center, void *observer,
     if (![n hasPrefix:kNotifyPrefix]) return;
     NSString *action = [n substringFromIndex:kNotifyPrefix.length];
     dispatch_async(dispatch_get_main_queue(), ^{
+        if ([action isEqualToString:@"link"]) { // 取出转发来的链接名称
+            NSString *name = CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)@"pendingLink", (__bridge CFStringRef)kSuite));
+            if ([name isKindOfClass:[NSString class]] && name.length > 0) MGRunLink(name);
+            return;
+        }
         MGPerformInSpringBoard(action);
     });
 }
@@ -458,9 +537,24 @@ static void MGDispatchAction(NSString *action)
             MGLog(@"锁屏界面手势已全局关闭, 忽略动作: %@", action);
             return;
         }
+        if ([action hasPrefix:@"link:"]) { // 预设链接: 按名称执行
+            MGRunLink([action substringFromIndex:5]);
+            MGHaptic();
+            return;
+        }
         MGLog(@"触发动作: %@", action);
         MGPerformInSpringBoard(action);
     } else {
+        if ([action hasPrefix:@"link:"]) { // 先把链接名称写进偏好, 再发通用通知 (通知名有长度限制)
+            CFPreferencesSetAppValue((__bridge CFStringRef)@"pendingLink",
+                (__bridge CFTypeRef)[action substringFromIndex:5], (__bridge CFStringRef)kSuite);
+            CFPreferencesAppSynchronize((__bridge CFStringRef)kSuite);
+            CFNotificationCenterPostNotification(
+                CFNotificationCenterGetDarwinNotifyCenter(),
+                (__bridge CFStringRef)[kNotifyPrefix stringByAppendingString:@"link"],
+                NULL, NULL, TRUE);
+            return;
+        }
         MGLog(@"转发动作给 SpringBoard: %@", action);
         CFNotificationCenterPostNotification(
             CFNotificationCenterGetDarwinNotifyCenter(),
@@ -660,7 +754,8 @@ static BOOL MGAppBlacklisted(void)
         if (MGIsSpringBoard()) {
             CFNotificationCenterRef nc = CFNotificationCenterGetDarwinNotifyCenter();
             for (NSString *a in @[@"lock", @"screenshot", @"respring", @"flashlight", @"home", @"settingspanel",
-                                  @"wifi", @"bluetooth", @"airplane", @"lowpower", @"playpause", @"nexttrack", @"prevtrack"]) {
+                                  @"wifi", @"bluetooth", @"airplane", @"lowpower", @"playpause", @"nexttrack", @"prevtrack",
+                                  @"volup", @"voldown", @"mute", @"appswitcher", @"link"]) {
                 CFNotificationCenterAddObserver(nc, NULL, MGDarwinCallback,
                     (__bridge CFStringRef)[kNotifyPrefix stringByAppendingString:a],
                     NULL, CFNotificationSuspensionBehaviorCoalesce);
