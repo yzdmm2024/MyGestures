@@ -105,6 +105,36 @@ static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
     return s;
 }
 
+#pragma mark - PSListController 偏好桥接 (闪退修复)
+
+// iOS 16 的 PSListController 不自带 readPreferenceValue:/setPreferenceValue:specifier:,
+// 必须自己提供 (按 specifier 的 defaults/key 属性读写 CFPreferences)。
+// 缺了它建 cell 时消息转发 -> doesNotRecognizeSelector -> SIGABRT 闪退 (真机崩溃日志实锤)。
+@implementation PSListController (MGPrefsBridge)
+
+- (id)readPreferenceValue:(PSSpecifier *)specifier
+{
+    NSString *key = [specifier propertyForKey:@"key"];
+    if (!key.length) return nil;
+    NSString *suite = [specifier propertyForKey:@"defaults"];
+    if (!suite.length) suite = MG_SUITE;
+    id v = CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)key, (__bridge CFStringRef)suite));
+    if (!v) v = [specifier propertyForKey:@"default"];
+    return v;
+}
+
+- (void)setPreferenceValue:(id)value specifier:(PSSpecifier *)specifier
+{
+    NSString *key = [specifier propertyForKey:@"key"];
+    if (!key.length) return;
+    NSString *suite = [specifier propertyForKey:@"defaults"];
+    if (!suite.length) suite = MG_SUITE;
+    CFPreferencesSetAppValue((__bridge CFStringRef)key, (__bridge CFTypeRef)value, (__bridge CFStringRef)suite);
+    CFPreferencesAppSynchronize((__bridge CFStringRef)suite);
+}
+
+@end
+
 #pragma mark - 主控制器
 
 @interface MGSettingsController : PSListController
@@ -117,7 +147,7 @@ static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
 - (void)viewWillAppear:(BOOL)animated
 {
     [super viewWillAppear:animated];
-    self.title = @"我的手势 0.1.0";
+    self.title = @"我的手势 0.1.1";
     [self attachDiagramHeader];
 }
 
