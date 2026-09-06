@@ -596,35 +596,48 @@ static NSArray *MGTweakAppRows(void)
     return cached;
 }
 
-static UIImage *MGTweakIcon(NSString *bundlePath)
+// 图标缓存: %ctor 后台预热全部图标, 抽屉打开零等待
+static NSMutableDictionary *mgTweakIconCache = nil;
+
+static UIImage *MGTweakIcon(NSString *bid, NSString *bundlePath)
 {
-    if (!bundlePath.length) return nil;
-    NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:
-        [bundlePath stringByAppendingPathComponent:@"Info.plist"]];
-    if (![info isKindOfClass:[NSDictionary class]]) return nil;
-    NSString *name = nil;
-    NSDictionary *icons = info[@"CFBundleIcons"];
-    if ([icons isKindOfClass:[NSDictionary class]]) {
-        NSDictionary *primary = icons[@"CFBundlePrimaryIcon"];
-        if ([primary isKindOfClass:[NSDictionary class]]) {
-            NSArray *files = primary[@"CFBundleIconFiles"];
-            if ([files isKindOfClass:[NSArray class]] && files.count > 0) name = files.lastObject;
+    if (!mgTweakIconCache) mgTweakIconCache = [NSMutableDictionary new];
+    UIImage *cached = mgTweakIconCache[bid];
+    if (cached) return cached;
+    UIImage *img = nil;
+    if (bundlePath.length) {
+        NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:
+            [bundlePath stringByAppendingPathComponent:@"Info.plist"]];
+        if ([info isKindOfClass:[NSDictionary class]]) {
+            NSString *name = nil;
+            NSDictionary *icons = info[@"CFBundleIcons"];
+            if ([icons isKindOfClass:[NSDictionary class]]) {
+                NSDictionary *primary = icons[@"CFBundlePrimaryIcon"];
+                if ([primary isKindOfClass:[NSDictionary class]]) {
+                    NSArray *files = primary[@"CFBundleIconFiles"];
+                    if ([files isKindOfClass:[NSArray class]] && files.count > 0) name = files.lastObject;
+                }
+            }
+            if (!name.length) name = info[@"CFBundleIconFile"];
+            if (name.length) {
+                for (NSString *cand in @[[NSString stringWithFormat:@"%@@2x.png", name],
+                                         [NSString stringWithFormat:@"%@@3x.png", name],
+                                         [name stringByAppendingPathExtension:@"png"], name]) {
+                    UIImage *raw = [UIImage imageWithContentsOfFile:[bundlePath stringByAppendingPathComponent:cand]];
+                    if (raw) {
+                        UIGraphicsImageRenderer *r = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(40, 40)];
+                        img = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+                            [raw drawInRect:CGRectMake(0, 0, 40, 40)];
+                        }];
+                        break;
+                    }
+                }
+            }
         }
     }
-    if (!name.length) name = info[@"CFBundleIconFile"];
-    if (!name.length) return nil;
-    for (NSString *cand in @[[NSString stringWithFormat:@"%@@2x.png", name],
-                             [NSString stringWithFormat:@"%@@3x.png", name],
-                             [name stringByAppendingPathExtension:@"png"], name]) {
-        UIImage *img = [UIImage imageWithContentsOfFile:[bundlePath stringByAppendingPathComponent:cand]];
-        if (img) {
-            UIGraphicsImageRenderer *r = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(40, 40)];
-            return [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
-                [img drawInRect:CGRectMake(0, 0, 40, 40)];
-            }];
-        }
-    }
-    return nil;
+    if (!img) img = [UIImage new]; // 占位避免重复读盘
+    mgTweakIconCache[bid] = img;
+    return img;
 }
 
 @interface MGDrawerCell : UICollectionViewCell
@@ -709,7 +722,7 @@ static UIImage *MGTweakIcon(NSString *bundlePath)
     MGDrawerCell *cell = [cv dequeueReusableCellWithReuseIdentifier:@"mgcell" forIndexPath:indexPath];
     NSArray *row = MGTweakAppRows()[indexPath.item];
     cell.label.text = row[0];
-    cell.iconView.image = MGTweakIcon(row[2]);
+    cell.iconView.image = MGTweakIcon(row[1], row[2]);
     return cell;
 }
 
@@ -801,7 +814,7 @@ static void MGPerformInSpringBoard(NSString *action)
     if ([action isEqualToString:@"lock"])              MGLockScreen();
     else if ([action isEqualToString:@"screenshot"])  MGScreenshot();
     else if ([action isEqualToString:@"flashlight"])  MGToggleFlashlight();
-    else if ([action isEqualToString:@"respring"])    { MGHaptic(); MGRespring(); return; }
+    else if ([action isEqualToString:@"respring"])    MGRespring();
     else if ([action isEqualToString:@"home"])        MGGoHome();
     else if ([action isEqualToString:@"settingspanel"]) MGOpenPrefsPanel();
     else if ([action isEqualToString:@"wifi"])        MGToggleWiFi();
@@ -819,7 +832,6 @@ static void MGPerformInSpringBoard(NSString *action)
     else if ([action isEqualToString:@"wlan"])        MGOpenWLAN();
     else if ([action isEqualToString:@"cellular"])    MGToggleCellular();
     else if ([action isEqualToString:@"drawer"])      MGShowDrawer();
-    MGHaptic(); // 手势执行成功震动
 }
 
 /* ============ darwin 通知: 把 App 内的手势转发给 SpringBoard ============ */
@@ -854,14 +866,13 @@ static void MGDispatchAction(NSString *action)
             MGLog(@"锁屏界面手势已全局关闭, 忽略动作: %@", action);
             return;
         }
+        MGHaptic(); // 即时震动反馈 (识别到手势立刻响应, 不等动作执行)
         if ([action hasPrefix:@"link:"]) { // 预设链接: 按名称执行
             MGRunLink([action substringFromIndex:5]);
-            MGHaptic();
             return;
         }
-        if ([action hasPrefix:@"app:"]) { // 打开应用: 按 bundle id 走 scheme 表
+        if ([action hasPrefix:@"app:"]) { // 打开应用: 按 bundle id 走 SBS 启动
             MGOpenAppByID([action substringFromIndex:4]);
-            MGHaptic();
             return;
         }
         MGLog(@"触发动作: %@", action);
@@ -1083,7 +1094,15 @@ static BOOL MGAppBlacklisted(void)
                     (__bridge CFStringRef)[kNotifyPrefix stringByAppendingString:a],
                     NULL, CFNotificationSuspensionBehaviorCoalesce);
             }
-            MGLog(@"已加载到 SpringBoard v0.1.0 (耳朵分区/刘海灵动岛丢弃/下滑透传)");
+            MGLog(@"已加载到 SpringBoard v0.5.1 (耳朵分区/刘海灵动岛丢弃/下滑透传)");
+            // 后台预热: 应用列表 + 全部图标 (应用抽屉秒开)
+            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                @autoreleasepool {
+                    NSArray *rows = MGTweakAppRows();
+                    for (NSArray *r in rows) MGTweakIcon(r[1], r[2]);
+                    MGLog(@"抽屉预热完成 (%u 应用)", (unsigned)rows.count);
+                }
+            });
         }
     }
 }
