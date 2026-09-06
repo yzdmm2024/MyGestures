@@ -180,8 +180,8 @@ static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
 {
     NSString *key = [spec propertyForKey:@"mgKey"];
     if (!key.length) return nil;
-    id v = CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)key, (__bridge CFStringRef)MG_SUITE));
-    if (![v isKindOfClass:[NSString class]] || !v.length) v = @"none";
+    NSString *v = CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)key, (__bridge CFStringRef)MG_SUITE));
+    if (![v isKindOfClass:[NSString class]] || v.length == 0) v = @"none";
     return MGActionTitle(v);
 }
 
