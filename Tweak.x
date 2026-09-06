@@ -310,7 +310,7 @@ static void MGToggleWiFi(void)
     if (c) {
         id mon = ((id (*)(id, SEL))objc_msgSend)([c alloc], sel_registerName("init"));
         if (mon) {
-            [mon performAction:nil];
+            ((void (*)(id, SEL, id))objc_msgSend)(mon, sel_registerName("performAction:"), nil);
             MGLog(@"WiFi开关 成功 (WFControlCenterStateMonitor performAction)");
             return;
         }
