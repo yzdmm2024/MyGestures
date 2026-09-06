@@ -47,20 +47,24 @@ NSString *MGActionTitle(NSString *act)
         @"camera":        @"相机",
         @"wlan":          @"无线局域网",
         @"cellular":          @"蜂窝网络开关",
+        @"drawer":        @"应用抽屉",
     };
     return map[act] ?: act;
 }
 
 // 各手势类型允许的动作
 static NSArray *MGActsSingle(void) { return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home",
+    @"camera", @"drawer",
     @"wifi", @"wlan", @"cellular", @"bluetooth", @"airplane", @"lowpower",
-    @"playpause", @"nexttrack", @"prevtrack", @"volup", @"voldown", @"mute", @"appswitcher", @"camera", @"settingspanel"]; }
+    @"playpause", @"nexttrack", @"prevtrack", @"volup", @"voldown", @"mute", @"appswitcher", @"settingspanel"]; };
 static NSArray *MGActsDouble(void) { return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home",
+    @"camera", @"drawer",
     @"wifi", @"wlan", @"cellular", @"bluetooth", @"airplane", @"lowpower",
-    @"playpause", @"nexttrack", @"prevtrack", @"volup", @"voldown", @"mute", @"appswitcher", @"camera"]; }
+    @"playpause", @"nexttrack", @"prevtrack", @"volup", @"voldown", @"mute", @"appswitcher"]; };
 static NSArray *MGActsSwipe(void)  { return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home",
+    @"camera", @"drawer",
     @"wifi", @"wlan", @"cellular", @"bluetooth", @"airplane", @"lowpower",
-    @"playpause", @"nexttrack", @"prevtrack", @"volup", @"voldown", @"mute", @"appswitcher", @"camera"]; }
+    @"playpause", @"nexttrack", @"prevtrack", @"volup", @"voldown", @"mute", @"appswitcher"]; };
 
 #pragma mark - 选择子页面基类
 

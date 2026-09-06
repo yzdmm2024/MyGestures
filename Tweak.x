@@ -435,9 +435,32 @@ static void MGAppSwitcher(void)
     MGLog(@"App切换器失败: SBUIController 不可用");
 }
 
-// 0.4.0 新增: 相机 / 无线局域网设置页 / 蜂窝网络设置页 (全部走已验证的 URL 通路)
+// 0.5.0: 相机 (真实启动相机App) / 无线局域网设置页 / 蜂窝网络开关
 static void MGDispatchAction(NSString *action); // 前置声明(run 回环用)
-static void MGOpenCamera(void)   { MGOpenURLString(@"camera://"); }
+
+// 按 bundle id 真实启动 App: SBSLaunchApplicationWithIdentifier
+// (网上资料 + 真机实测: 不崩, 真实打开 —— 本项目 App 打开的最终解)
+static BOOL MGLaunchApp(NSString *bid)
+{
+    static void (*sbsLaunch)(CFStringRef, int) = NULL;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        void *h = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_LAZY);
+        if (h) sbsLaunch = (void (*)(CFStringRef, int))dlsym(h, "SBSLaunchApplicationWithIdentifier");
+    });
+    if (!sbsLaunch || bid.length == 0) return NO;
+    sbsLaunch((__bridge CFStringRef)bid, 0);
+    return YES;
+}
+
+static void MGOpenCamera(void)
+{
+    if (MGLaunchApp(@"com.apple.camera")) {
+        MGLog(@"相机 成功 (SBS 启动)");
+        return;
+    }
+    MGOpenURLString(@"camera://"); // 兜底
+}
 static void MGOpenWLAN(void)     { MGOpenURLString(@"prefs:root=WIFI"); }
 static void MGToggleCellular(void)
 {
@@ -456,9 +479,13 @@ static void MGToggleCellular(void)
     MGOpenURLString(@"prefs:root=MOBILE_DATA_SETTINGS_ID");
 }
 
-// 打开指定 App: 常用 App 走内置 scheme 表; 无 scheme 的用快捷指令桥接 (我的链接)
+// 打开指定 App: SBS 真实启动; 失败回退 scheme 表
 static void MGOpenAppByID(NSString *bid)
 {
+    if (MGLaunchApp(bid)) {
+        MGLog(@"打开应用成功 (SBSLaunchApplicationWithIdentifier %@)", bid);
+        return;
+    }
     NSDictionary *map = @{
         @"com.tencent.xin":          @"weixin://",        // 微信
         @"com.tencent.mqq":          @"mqq://",           // QQ
@@ -501,6 +528,223 @@ static void MGOpenURLString(NSString *urlString)
         return;
     }
     MGLog(@"打开链接失败: SBSOpenSensitiveURL 不可用");
+}
+
+#pragma mark - 应用抽屉 (0.5.0): 左滑弹出应用面板, 点图标直接打开
+
+static void MGHaptic(void);   // 前置声明(实现在媒体区)
+static BOOL MGLaunchApp(NSString *bid); // 前置声明
+
+// tweak 侧应用枚举 (与面板同一过滤规则: 预装+沙盒, 排除无图标系统级程序)
+static NSArray *MGTweakAppRows(void)
+{
+    static NSArray *cached = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSMutableArray *rows = [NSMutableArray array];
+        @try {
+            Class wsClass = objc_getClass("LSApplicationWorkspace");
+            id ws = wsClass ? ((id (*)(id, SEL))objc_msgSend)(wsClass, sel_registerName("defaultWorkspace")) : nil;
+            NSArray *apps = nil;
+            if (ws) {
+                SEL s = sel_registerName("allInstalledApplications"); // 16.6 真名
+                if ([ws respondsToSelector:s]) apps = ((NSArray *(*)(id, SEL))objc_msgSend)(ws, s);
+            }
+            for (id app in apps ?: @[]) {
+                @try {
+                    NSString *bid = [app respondsToSelector:@selector(bundleIdentifier)] ? [app bundleIdentifier] : nil;
+                    if (!bid.length) continue;
+                    NSString *name = nil;
+                    for (NSString *selName in @[@"localizedDisplayName", @"localizedName"]) {
+                        SEL s = NSSelectorFromString(selName);
+                        if ([app respondsToSelector:s]) {
+                            NSString *n = ((NSString *(*)(id, SEL))objc_msgSend)(app, s);
+                            if (n.length) { name = n; break; }
+                        }
+                    }
+                    if (!name.length) name = bid;
+                    NSString *appType = nil;
+                    if ([app respondsToSelector:@selector(applicationType)]) {
+                        id t = ((id (*)(id, SEL))objc_msgSend)(app, @selector(applicationType));
+                        if ([t isKindOfClass:[NSString class]]) appType = t;
+                    }
+                    NSString *bundlePath = nil;
+                    if ([app respondsToSelector:@selector(bundleURL)]) {
+                        NSURL *u = [app bundleURL];
+                        bundlePath = u ? u.path : nil;
+                    }
+                    BOOL isUser = [appType isEqualToString:@"User"];
+                    BOOL hasIconFile = NO;
+                    if (bundlePath.length) {
+                        NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:
+                            [bundlePath stringByAppendingPathComponent:@"Info.plist"]];
+                        NSDictionary *icons = info[@"CFBundleIcons"];
+                        hasIconFile = [icons isKindOfClass:[NSDictionary class]] &&
+                            [icons[@"CFBundlePrimaryIcon"] isKindOfClass:[NSDictionary class]];
+                    }
+                    if (!isUser && !(hasIconFile && [appType isEqualToString:@"System"])) continue;
+                    [rows addObject:@[name, bid, bundlePath ?: @""]];
+                } @catch (NSException *e) {}
+            }
+            [rows sortUsingComparator:^NSComparisonResult(NSArray *a, NSArray *b) {
+                return [a[0] compare:b[0] options:NSNumericSearch | NSCaseInsensitiveSearch];
+            }];
+        } @catch (NSException *e) { MGLog(@"抽屉枚举失败: %@", e); }
+        cached = [rows copy];
+    });
+    return cached;
+}
+
+static UIImage *MGTweakIcon(NSString *bundlePath)
+{
+    if (!bundlePath.length) return nil;
+    NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:
+        [bundlePath stringByAppendingPathComponent:@"Info.plist"]];
+    if (![info isKindOfClass:[NSDictionary class]]) return nil;
+    NSString *name = nil;
+    NSDictionary *icons = info[@"CFBundleIcons"];
+    if ([icons isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *primary = icons[@"CFBundlePrimaryIcon"];
+        if ([primary isKindOfClass:[NSDictionary class]]) {
+            NSArray *files = primary[@"CFBundleIconFiles"];
+            if ([files isKindOfClass:[NSArray class]] && files.count > 0) name = files.lastObject;
+        }
+    }
+    if (!name.length) name = info[@"CFBundleIconFile"];
+    if (!name.length) return nil;
+    for (NSString *cand in @[[NSString stringWithFormat:@"%@@2x.png", name],
+                             [NSString stringWithFormat:@"%@@3x.png", name],
+                             [name stringByAppendingPathExtension:@"png"], name]) {
+        UIImage *img = [UIImage imageWithContentsOfFile:[bundlePath stringByAppendingPathComponent:cand]];
+        if (img) {
+            UIGraphicsImageRenderer *r = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(40, 40)];
+            return [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+                [img drawInRect:CGRectMake(0, 0, 40, 40)];
+            }];
+        }
+    }
+    return nil;
+}
+
+@interface MGDrawerCell : UICollectionViewCell
+@property (nonatomic, strong) UIImageView *iconView;
+@property (nonatomic, strong) UILabel *label;
+@end
+@implementation MGDrawerCell
+- (instancetype)initWithFrame:(CGRect)frame
+{
+    self = [super initWithFrame:frame];
+    if (self) {
+        _iconView = [[UIImageView alloc] initWithFrame:CGRectMake(15, 8, 40, 40)];
+        _iconView.layer.cornerRadius = 9.0;
+        _iconView.clipsToBounds = YES;
+        _iconView.contentMode = UIViewContentModeScaleAspectFit;
+        [self.contentView addSubview:_iconView];
+        _label = [[UILabel alloc] initWithFrame:CGRectMake(2, 50, 66, 14)];
+        _label.font = [UIFont systemFontOfSize:10];
+        _label.textAlignment = NSTextAlignmentCenter;
+        _label.textColor = UIColor.whiteColor;
+        _label.lineBreakMode = NSLineBreakByTruncatingTail;
+        [self.contentView addSubview:_label];
+    }
+    return self;
+}
+@end
+
+@interface MGDrawerController : UIViewController <UICollectionViewDataSource, UICollectionViewDelegateFlowLayout>
+@property (nonatomic, assign) CGRect panelFrame;
+@end
+@implementation MGDrawerController
+
+- (void)viewDidLoad
+{
+    self.view.backgroundColor = [UIColor colorWithWhite:0 alpha:0.35];
+    CGFloat w = self.view.bounds.size.width;
+    CGFloat panelW = w - 40, panelH = 470;
+    UIView *panel = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark]];
+    panel.frame = CGRectMake(20, (self.view.bounds.size.height - panelH) / 2.0, panelW, panelH);
+    panel.layer.cornerRadius = 20.0;
+    panel.clipsToBounds = YES;
+    _panelFrame = panel.frame;
+    [self.view addSubview:panel];
+
+    UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(0, 10, panelW, 18)];
+    title.text = @"应用抽屉 · 点图标打开 · 点外面关闭";
+    title.textAlignment = NSTextAlignmentCenter;
+    title.font = [UIFont systemFontOfSize:12];
+    title.textColor = [UIColor colorWithWhite:1 alpha:0.8];
+    [panel addSubview:title];
+
+    UICollectionViewFlowLayout *fl = [[UICollectionViewFlowLayout alloc] init];
+    fl.itemSize = CGSizeMake(70, 74);
+    fl.minimumInteritemSpacing = 6;
+    fl.minimumLineSpacing = 6;
+    fl.sectionInset = UIEdgeInsetsMake(8, 8, 8, 8);
+    UICollectionView *grid = [[UICollectionView alloc] initWithFrame:
+        CGRectMake(0, 34, panelW, panelH - 34) collectionViewLayout:fl];
+    grid.dataSource = self;
+    grid.delegate = self;
+    grid.backgroundColor = UIColor.clearColor;
+    [grid registerClass:[MGDrawerCell class] forCellWithReuseIdentifier:@"mgcell"];
+    [panel addSubview:grid];
+
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(bgTap:)];
+    [self.view addGestureRecognizer:tap];
+}
+
+- (void)bgTap:(UITapGestureRecognizer *)t
+{
+    CGPoint p = [t locationInView:self.view];
+    if (!CGRectContainsPoint(_panelFrame, p)) MGDrawerDismiss();
+}
+
+- (NSInteger)collectionView:(UICollectionView *)view numberOfItemsInSection:(NSInteger)section
+{
+    return MGTweakAppRows().count;
+}
+
+- (UICollectionViewCell *)collectionView:(UICollectionView *)cv cellForItemAtIndexPath:(NSIndexPath *)indexPath
+{
+    MGDrawerCell *cell = [cv dequeueReusableCellWithReuseIdentifier:@"mgcell" forIndexPath:indexPath];
+    NSArray *row = MGTweakAppRows()[indexPath.item];
+    cell.label.text = row[0];
+    cell.iconView.image = MGTweakIcon(row[2]);
+    return cell;
+}
+
+- (void)collectionView:(UICollectionView *)cv didSelectItemAtIndexPath:(NSIndexPath *)indexPath
+{
+    NSArray *row = MGTweakAppRows()[indexPath.item];
+    MGHaptic();
+    MGLaunchApp(row[1]);
+    MGLog(@"抽屉打开应用: %@", row[1]);
+    MGDrawerDismiss();
+}
+
+@end
+
+static UIWindow *mgDrawerWindow = nil;
+
+static void MGDrawerDismiss(void)
+{
+    if (mgDrawerWindow) {
+        UIWindow *w = mgDrawerWindow;
+        mgDrawerWindow = nil;
+        w.hidden = YES;
+    }
+}
+
+static void MGShowDrawer(void)
+{
+    if (mgDrawerWindow) { MGDrawerDismiss(); return; } // 再触发一次 = 关闭
+    id scene = [[UIApplication sharedApplication].connectedScenes anyObject];
+    if (!scene) { MGLog(@"抽屉失败: 无 windowScene"); return; }
+    mgDrawerWindow = [[UIWindow alloc] initWithWindowScene:scene];
+    mgDrawerWindow.frame = CGRectMake(0, 0, [UIScreen mainScreen].bounds.size.width, [UIScreen mainScreen].bounds.size.height);
+    mgDrawerWindow.windowLevel = UIWindowLevelAlert + 100;
+    mgDrawerWindow.rootViewController = [MGDrawerController new];
+    [mgDrawerWindow makeKeyAndVisible];
+    MGLog(@"应用抽屉已显示 (%u 个应用)", (unsigned)MGTweakAppRows().count);
 }
 
 // 执行预设链接: 按名称查 links 预设表 (数组, 每项 {n:名称, u:网址})
@@ -573,6 +817,7 @@ static void MGPerformInSpringBoard(NSString *action)
     else if ([action isEqualToString:@"camera"])      MGOpenCamera();
     else if ([action isEqualToString:@"wlan"])        MGOpenWLAN();
     else if ([action isEqualToString:@"cellular"])    MGToggleCellular();
+    else if ([action isEqualToString:@"drawer"])      MGShowDrawer();
     MGHaptic(); // 手势执行成功震动
 }
 
@@ -832,7 +1077,7 @@ static BOOL MGAppBlacklisted(void)
             for (NSString *a in @[@"lock", @"screenshot", @"respring", @"flashlight", @"home", @"settingspanel",
                                   @"wifi", @"bluetooth", @"airplane", @"lowpower", @"playpause", @"nexttrack", @"prevtrack",
                                   @"volup", @"voldown", @"mute", @"appswitcher", @"link", @"run",
-                                  @"camera", @"wlan", @"cellular"]) {
+                                  @"camera", @"wlan", @"cellular", @"drawer"]) {
                 CFNotificationCenterAddObserver(nc, NULL, MGDarwinCallback,
                     (__bridge CFStringRef)[kNotifyPrefix stringByAppendingString:a],
                     NULL, CFNotificationSuspensionBehaviorCoalesce);
