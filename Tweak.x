@@ -237,6 +237,8 @@ static void MGGoHome(void)
     MGLog(@"返回主屏幕失败: SBUIController 方法不可用");
 }
 
+static void MGOpenURLString(NSString *urlString); // 前置声明(实现在媒体区)
+
 // 打开设置面板: 直接走已验证安全的 openURL 通路 (prefs: 页面深链不中时也会打开设置根页)
 static void MGOpenPrefsPanel(void)
 {
