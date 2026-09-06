@@ -1,0 +1,9 @@
+Package: com.local.mygestures
+Name: MyGestures
+Version: 0.0.1
+Architecture: iphoneos-arm64
+Description: 状态栏手势：单击/双击/三击/左滑/右滑 可绑定 锁屏、截屏、注销、手电筒
+Maintainer: you <you@localhost>
+Author: you
+Section: Tweaks
+Depends: mobilesubstrate, firmware (>= 16.0)
