@@ -172,8 +172,7 @@
 		</dict>
 		<dict>
 			<key>cell</key>
-			<string>PSGroupCell</key>
-			<string></string>
+			<string>PSGroupCell</string>
 			<key>label</key>
 			<string>说明</string>
 			<key>footerText</key>
