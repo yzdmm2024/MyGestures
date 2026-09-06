@@ -1,6 +1,6 @@
 Package: com.local.mygestures
 Name: 我的手势
-Version: 0.1.1
+Version: 0.1.2
 Architecture: iphoneos-arm64
 Depends: firmware (>= 16.0), mobilesubstrate, preferenceloader
 Maintainer: yzdmm2024
