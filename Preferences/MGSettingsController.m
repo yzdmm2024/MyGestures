@@ -11,7 +11,7 @@
 {
     if (!_specifiers) {
         // 加载 bundle 里的 Root.plist
-        _specifiers = [[self loadSpecifiersFromPlistName:@"Root" target:self] retain];
+        _specifiers = [self loadSpecifiersFromPlistName:@"Root" target:self];
     }
     return _specifiers;
 }
