@@ -1,20 +1,22 @@
 /**
- * MyGestures —— 状态栏手势插件 (rootless)
+ * MyGestures v0.1.0 —— 状态栏左右"耳朵"手势 (rootless)
  *
- * 适用环境: iPhone 12 Pro / iOS 16.6.1 / Relaxin (基于 Dopamine 的 rootless 越狱)
- * 构建方式: Theos, 需设置 THEOS_PACKAGE_SCHEME=rootless
+ * 适用环境: iPhone X–16 / iOS 16.x / Relaxin (Dopamine 系 rootless 越狱)
+ * 构建: Theos, THEOS_PACKAGE_SCHEME=rootless
  *
- * 手势 (作用于屏幕最顶部"状态栏"区域, 任何界面都有效, 包括锁屏):
- *   - 单击 / 双击 / 三击状态栏
- *   - 状态栏左滑 / 右滑
+ * 核心规则:
+ *   - 只识别状态栏左右"耳朵"区域; 刘海/灵动岛本体矩形内的触摸一律忽略, 不响应手势
+ *   - 仅支持: 单击 / 双击 / 左滑; 长按、三击、上滑、下滑全部交给系统原生处理
+ *   - 事件只观察不拦截 (%orig 永远先走), 下拉通知中心/控制中心完整透传,
+ *     可与各类控制中心越狱插件共存
+ *   - 双击: 两次点击必须落在同一个耳朵区域, 跨耳朵点击不计双击
  *
- * 可绑定动作:
- *   无 / 锁屏 / 截屏 / 注销(respring) / 手电筒开关
+ * 模式:
+ *   不分段(默认): 左右耳朵共用 singleTap / doubleTap / swipeLeft 三个键
+ *   分段:        left_* / right_* 六个键, 左段时间侧、右段电池信号侧独立
  *
- * 工作原理:
- *   注入所有 UIKit 进程 (filter = com.apple.UIKit), hook UIWindow 的 sendEvent:
- *   - 在 SpringBoard 进程内识别到手势 -> 直接执行动作
- *   - 在其它 App 内识别到手势       -> 通过 darwin 通知转发给 SpringBoard 执行
+ * 动作: none/lock/screenshot/flashlight/respring/home/settingspanel
+ *       (settingspanel 仅单击可用; 面板已限制)
  */
 
 #import <UIKit/UIKit.h>
@@ -30,33 +32,32 @@
 
 /* ========================= 偏好设置 ========================= */
 
-// 面板 (MyGesturesPrefs) 与 tweak 通过同一个 CFPreferences suite 通信,
-// 设置改动经 cfprefsd 立即对所有进程可见, 改完即生效
-static NSString *const kPrefSuite = @"com.local.mygestures";
+static NSString *const kSuite        = @"com.local.mygestures";
 static NSString *const kNotifyPrefix = @"com.local.mygestures.";
+
+static id MGPrefValue(NSString *key)
+{
+    CFPreferencesAppSynchronize((__bridge CFStringRef)kSuite);
+    CFTypeRef raw = CFPreferencesCopyAppValue((__bridge CFStringRef)key, (__bridge CFStringRef)kSuite);
+    return raw ? CFBridgingRelease(raw) : nil;
+}
 
 static NSString *MGPrefString(NSString *key)
 {
-    CFPreferencesAppSynchronize((__bridge CFStringRef)kPrefSuite);
-    CFTypeRef raw = CFPreferencesCopyAppValue((__bridge CFStringRef)key, (__bridge CFStringRef)kPrefSuite);
-    if (!raw) return nil;
-    NSString *v = CFBridgingRelease(raw);
+    id v = MGPrefValue(key);
     return [v isKindOfClass:[NSString class]] ? v : nil;
 }
 
-// 出厂默认动作 (设置面板没保存过时使用)
-static NSString *MGDefaultActionForKey(NSString *key)
+static BOOL MGPrefBool(NSString *key, BOOL def)
 {
-    if ([key isEqualToString:@"doubleTap"]) return @"lock";        // 双击状态栏 = 锁屏
-    if ([key isEqualToString:@"tripleTap"]) return @"screenshot";  // 三击状态栏 = 截屏
-    if ([key isEqualToString:@"swipeLeft"]) return @"flashlight";  // 状态栏左滑 = 手电筒
-    return @"none";                                                // 单击 / 右滑默认关闭, 避免误触
+    id v = MGPrefValue(key);
+    return [v isKindOfClass:[NSNumber class]] ? [v boolValue] : def;
 }
 
-static NSString *MGActionForGesture(NSString *key)
+static CGFloat MGPrefFloat(NSString *key, CGFloat def)
 {
-    NSString *v = MGPrefString(key);
-    return (v.length > 0) ? v : MGDefaultActionForKey(key);
+    id v = MGPrefValue(key);
+    return [v isKindOfClass:[NSNumber class]] ? [v doubleValue] : def;
 }
 
 static BOOL MGActionEnabled(NSString *action)
@@ -64,7 +65,63 @@ static BOOL MGActionEnabled(NSString *action)
     return action.length > 0 && ![action isEqualToString:@"none"];
 }
 
-/* ================== 动作执行 (只能在 SpringBoard 进程内做) ================== */
+/* ===================== 耳朵区域判定 ===================== */
+
+typedef NS_ENUM(NSInteger, MGEar) {
+    MGEarNone  = 0, // 状态栏区域外 / 刘海·灵动岛本体 → 直接忽略
+    MGEarLeft  = 1, // 左耳朵 (时间侧)
+    MGEarRight = 2, // 右耳朵 (信号/Wi-Fi/电池侧)
+};
+
+/*
+ * 判定依据 (不硬编码机型):
+ *   safeAreaInsets.top >= 45 → 刘海/灵动岛机型 (X-13 约 44~48, 灵动岛 54~59),
+ *                              中间 24% 宽的遮挡矩形不响应手势, 左右 38% 各为一只耳朵
+ *   否则                     → 非遮挡机型, 左右各 50% (X-16 全是遮挡机型, 此分支兜底)
+ */
+static MGEar MGEarForPoint(UIWindow *w, CGPoint p)
+{
+    CGFloat top = w.safeAreaInsets.top;
+    CGFloat zoneH = (top >= 20.0 ? top : 20.0) + 10.0; // 状态栏高度 + 10pt 容差
+    if (p.y < 0.0 || p.y > zoneH) return MGEarNone;
+
+    CGFloat bw = w.bounds.size.width;
+    if (top >= 45.0) { // 刘海 / 灵动岛机型
+        if (p.x < bw * 0.38) return MGEarLeft;
+        if (p.x > bw * 0.62) return MGEarRight;
+        return MGEarNone; // 🔴 刘海/灵动岛本体 → 触摸丢弃
+    }
+    return (p.x < bw * 0.5) ? MGEarLeft : MGEarRight;
+}
+
+/* ===================== 手势 → 动作键 ===================== */
+
+static NSString *MGEarName(MGEar ear)
+{
+    return (ear == MGEarRight) ? @"right" : @"left";
+}
+
+static NSString *MGDefaultActionForKey(NSString *key)
+{
+    if ([key hasSuffix:@"doubleTap"] || [key isEqualToString:@"doubleTap"]) return @"lock";
+    if ([key hasSuffix:@"swipeLeft"]  || [key isEqualToString:@"swipeLeft"])  return @"flashlight";
+    return @"none"; // 单击默认关, 防误触
+}
+
+// 分段模式: left_doubleTap 这类键; 不分段: doubleTap
+static NSString *MGActionForGesture(MGEar ear, NSString *gesture)
+{
+    NSString *key;
+    if (MGPrefBool(@"splitMode", NO) && ear != MGEarNone)
+        key = [NSString stringWithFormat:@"%@_%@", MGEarName(ear), gesture];
+    else
+        key = gesture;
+
+    NSString *v = MGPrefString(key);
+    return (v.length > 0) ? v : MGDefaultActionForKey(key);
+}
+
+/* ============== 动作执行 (只能在 SpringBoard 进程内做) ============== */
 
 static BOOL MGIsSpringBoard(void)
 {
@@ -76,12 +133,20 @@ static BOOL MGIsSpringBoard(void)
     return isSB;
 }
 
+static BOOL MGUILocked(void)
+{
+    Class c = objc_getClass("SBLockScreenManager");
+    if (!c) return NO;
+    id inst = ((id (*)(id, SEL))objc_msgSend)(c, sel_registerName("sharedInstance"));
+    if (!inst || ![inst respondsToSelector:@selector(isUILocked)]) return NO;
+    return ((BOOL (*)(id, SEL))objc_msgSend)(inst, @selector(isUILocked));
+}
+
 static void MGLockScreen(void)
 {
-    // 主路径: SpringBoard 内部类 SBUIController 的 -lock
     Class c = objc_getClass("SBUIController");
     if (c) {
-        id inst = ((id (*)(id, SEL))objc_msgSend)((id)c, sel_registerName("sharedInstance"));
+        id inst = ((id (*)(id, SEL))objc_msgSend)(c, sel_registerName("sharedInstance"));
         SEL lockSel = sel_registerName("lock");
         if (inst && [inst respondsToSelector:lockSel]) {
             ((void (*)(id, SEL))objc_msgSend)(inst, lockSel);
@@ -89,25 +154,19 @@ static void MGLockScreen(void)
             return;
         }
     }
-    // 备用路径: SpringBoardServices 的 SBSLockDevice(), 用 dlsym 动态探测, 不存在则跳过
     void *h = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_LAZY);
     if (h) {
         void (*lockDev)(void) = (void (*)(void))dlsym(h, "SBSLockDevice");
-        if (lockDev) {
-            lockDev();
-            MGLog(@"锁屏成功 (SBSLockDevice)");
-            return;
-        }
+        if (lockDev) { lockDev(); MGLog(@"锁屏成功 (SBSLockDevice)"); return; }
     }
-    MGLog(@"锁屏失败: 未找到可用方法 (SBUIController / SBSLockDevice)");
+    MGLog(@"锁屏失败: 未找到可用方法");
 }
 
 static void MGScreenshot(void)
 {
-    // SpringBoard 内部类 SBScreenShotter, 不同系统版本方法名不同, 逐个尝试
     Class c = objc_getClass("SBScreenShotter");
     if (c) {
-        id inst = ((id (*)(id, SEL))objc_msgSend)((id)c, sel_registerName("sharedInstance"));
+        id inst = ((id (*)(id, SEL))objc_msgSend)(c, sel_registerName("sharedInstance"));
         if (inst) {
             NSArray *names = @[@"saveScreenshot", @"saveScreenshot:", @"takeScreenshot"];
             for (NSString *n in names) {
@@ -129,10 +188,7 @@ static void MGScreenshot(void)
 static void MGToggleFlashlight(void)
 {
     AVCaptureDevice *dev = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
-    if (!dev || !dev.hasTorch) {
-        MGLog(@"手电筒失败: 无闪光灯设备");
-        return;
-    }
+    if (!dev || !dev.hasTorch) { MGLog(@"手电筒失败: 无闪光灯设备"); return; }
     NSError *err = nil;
     if ([dev lockForConfiguration:&err]) {
         dev.torchMode = (dev.torchMode == AVCaptureTorchModeOn) ? AVCaptureTorchModeOff : AVCaptureTorchModeOn;
@@ -146,15 +202,75 @@ static void MGToggleFlashlight(void)
 static void MGRespring(void)
 {
     MGLog(@"注销 (respring)…");
-    exit(0); // launchd 会自动重新拉起 SpringBoard
+    exit(0);
+}
+
+static void MGGoHome(void)
+{
+    Class c = objc_getClass("SBUIController");
+    if (c) {
+        id inst = ((id (*)(id, SEL))objc_msgSend)(c, sel_registerName("sharedInstance"));
+        if (inst) {
+            SEL s = sel_registerName("simulateHomeButtonClick"); // iOS 13-16 通用
+            if ([inst respondsToSelector:s]) {
+                ((void (*)(id, SEL))objc_msgSend)(inst, s);
+                MGLog(@"返回主屏幕 (simulateHomeButtonClick)");
+                return;
+            }
+            s = sel_registerName("handleHomeButtonSinglePress");
+            if ([inst respondsToSelector:s]) {
+                ((void (*)(id, SEL))objc_msgSend)(inst, s);
+                MGLog(@"返回主屏幕 (handleHomeButtonSinglePress)");
+                return;
+            }
+        }
+    }
+    MGLog(@"返回主屏幕失败: SBUIController 方法不可用");
+}
+
+static void MGOpenPrefsPanel(void)
+{
+    // 从 SpringBoard 打开 设置→我的手势; 深链不中时设置至少会打开到根页(入口就在根列表)
+    void *h = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_LAZY);
+    if (h) {
+        void (*openURL)(CFURLRef, BOOL) = (void (*)(CFURLRef, BOOL))dlsym(h, "SBSOpenSensitiveURLWithOptions");
+        if (openURL) {
+            CFURLRef url = CFURLCreateWithString(kCFAllocatorDefault, (CFStringRef)@"prefs:root=MyGesturesPrefs", NULL);
+            if (url) {
+                openURL(url, NO);
+                CFRelease(url);
+                MGLog(@"打开设置面板 (prefs:root=MyGesturesPrefs)");
+                return;
+            }
+        }
+    }
+    MGLog(@"打开设置面板失败: SBSOpenSensitiveURLWithOptions 不可用");
+}
+
+static void MGHaptic(void)
+{
+    if (!MGPrefBool(@"hapticsEnabled", YES)) return;
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{ MGHaptic(); });
+        return;
+    }
+    @try {
+        UIImpactFeedbackGenerator *g = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+        [g impactOccurred];
+    } @catch (NSException *e) {
+        MGLog(@"震动失败: %@", e);
+    }
 }
 
 static void MGPerformInSpringBoard(NSString *action)
 {
-    if ([action isEqualToString:@"lock"])             MGLockScreen();
-    else if ([action isEqualToString:@"screenshot"]) MGScreenshot();
-    else if ([action isEqualToString:@"flashlight"]) MGToggleFlashlight();
-    else if ([action isEqualToString:@"respring"])   MGRespring();
+    if ([action isEqualToString:@"lock"])              MGLockScreen();
+    else if ([action isEqualToString:@"screenshot"])  MGScreenshot();
+    else if ([action isEqualToString:@"flashlight"])  MGToggleFlashlight();
+    else if ([action isEqualToString:@"respring"])    { MGHaptic(); MGRespring(); return; }
+    else if ([action isEqualToString:@"home"])        MGGoHome();
+    else if ([action isEqualToString:@"settingspanel"]) MGOpenPrefsPanel();
+    MGHaptic(); // 手势执行成功震动
 }
 
 /* ============ darwin 通知: 把 App 内的手势转发给 SpringBoard ============ */
@@ -165,7 +281,6 @@ static void MGDarwinCallback(CFNotificationCenterRef center, void *observer,
     NSString *n = (__bridge NSString *)name;
     if (![n hasPrefix:kNotifyPrefix]) return;
     NSString *action = [n substringFromIndex:kNotifyPrefix.length];
-    MGLog(@"收到转发动作: %@", action);
     dispatch_async(dispatch_get_main_queue(), ^{
         MGPerformInSpringBoard(action);
     });
@@ -174,10 +289,16 @@ static void MGDarwinCallback(CFNotificationCenterRef center, void *observer,
 static void MGDispatchAction(NSString *action)
 {
     if (!MGActionEnabled(action)) return;
-    MGLog(@"触发动作: %@ (%@)", action, MGIsSpringBoard() ? @"SpringBoard 内" : @"转发给 SpringBoard");
     if (MGIsSpringBoard()) {
+        // 全局开关: 锁屏界面手势 (App 内不受影响, App 前台时必非锁屏)
+        if (MGPrefBool(@"lockScreenEnabled", YES) == NO && MGUILocked()) {
+            MGLog(@"锁屏界面手势已全局关闭, 忽略动作: %@", action);
+            return;
+        }
+        MGLog(@"触发动作: %@", action);
         MGPerformInSpringBoard(action);
     } else {
+        MGLog(@"转发动作给 SpringBoard: %@", action);
         CFNotificationCenterPostNotification(
             CFNotificationCenterGetDarwinNotifyCenter(),
             (__bridge CFStringRef)[kNotifyPrefix stringByAppendingString:action],
@@ -187,13 +308,13 @@ static void MGDispatchAction(NSString *action)
 
 /* ========================= 手势识别 ========================= */
 
-// 手势判定区域: 状态栏高度 + 12pt 容差
-static CGFloat MGStatusZoneHeight(UIWindow *w)
+// App 黑名单: 命中则该 App 内全部状态栏手势失效 (SpringBoard 不受黑名单影响)
+static BOOL MGAppBlacklisted(void)
 {
-    CGFloat top = w.safeAreaInsets.top; // 12 Pro 竖屏为 47pt
-    if (top < 20) top = 20;             // 无刘海 / 横屏时的兜底
-    if (top > 90) top = 59;
-    return top + 12.0;
+    if (MGIsSpringBoard()) return NO;
+    NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
+    if (!bid.length) return NO;
+    return MGPrefBool([@"bl_" stringByAppendingString:bid], NO);
 }
 
 @interface MGTracker : NSObject
@@ -201,7 +322,9 @@ static CGFloat MGStatusZoneHeight(UIWindow *w)
 @property (nonatomic, weak)   UIWindow *window;
 @property (nonatomic, assign) CGPoint beginPoint;
 @property (nonatomic, assign) CFTimeInterval beginTime;
-@property (nonatomic, assign) NSUInteger tapCount;
+@property (nonatomic, assign) MGEar beginEar;      // 本次触摸开始的耳朵
+@property (nonatomic, assign) NSUInteger tapCount; // 已累计的点击数
+@property (nonatomic, assign) MGEar tapEar;        // 已累计点击所属的耳朵 (双击必须同耳)
 @property (nonatomic, strong) NSTimer *mergeTimer;
 + (instancetype)sharedTracker;
 - (void)touchBegan:(UITouch *)t inWindow:(UIWindow *)w;
@@ -227,24 +350,45 @@ static CGFloat MGStatusZoneHeight(UIWindow *w)
     _mergeTimer = nil;
 }
 
-- (void)fireTapCount:(NSUInteger)n
+- (void)clearTapChain
 {
-    [self reset];
-    NSString *key = (n >= 3) ? @"tripleTap" : (n == 2 ? @"doubleTap" : @"singleTap");
-    MGDispatchAction(MGActionForGesture(key));
+    _tapCount = 0;
+    _tapEar = MGEarNone;
+    [_mergeTimer invalidate];
+    _mergeTimer = nil;
+}
+
+// 间隔计时器到点: 仍只有一次点击 → 触发单击
+- (void)mergeTimerFired:(NSTimer *)tm
+{
+    _mergeTimer = nil;
+    if (_tapCount == 1) {
+        MGEar ear = _tapEar;
+        _tapCount = 0;
+        _tapEar = MGEarNone;
+        MGDispatchAction(MGActionForGesture(ear, @"singleTap"));
+    } else {
+        _tapCount = 0;
+        _tapEar = MGEarNone;
+    }
 }
 
 - (void)touchBegan:(UITouch *)t inWindow:(UIWindow *)w
 {
+    if (MGAppBlacklisted()) { [self reset]; return; }
+
     CGPoint p = [t locationInView:w];
-    if (p.y < 0.0 || p.y > MGStatusZoneHeight(w)) {
-        [self reset]; // 状态栏区域外的触摸会打断点按计数
+    MGEar ear = MGEarForPoint(w, p);
+    if (ear == MGEarNone) {
+        // 状态栏区域外 / 刘海·灵动岛本体 / 黑名单App → 不记录, 触摸原样透传系统
+        [self reset];
         return;
     }
-    _tracking = YES;
-    _window = w;
+    _tracking   = YES;
+    _window     = w;
     _beginPoint = p;
-    _beginTime = CACurrentMediaTime();
+    _beginTime  = CACurrentMediaTime();
+    _beginEar   = ear;
 }
 
 - (void)touchEnded:(UITouch *)t inWindow:(UIWindow *)w
@@ -257,55 +401,56 @@ static CGFloat MGStatusZoneHeight(UIWindow *w)
     CGFloat dy = p.y - _beginPoint.y;
     CFTimeInterval dt = CACurrentMediaTime() - _beginTime;
 
-    // 按住太久 / 大幅垂直移动(如下拉通知中心) —— 一律忽略, 避免误触
-    if (dt > 0.45 || fabs(dy) > 140.0) {
-        [self reset];
+    // 长按 / 大幅下拉(通知中心·控制中心手势) → 全部交给系统, 不做任何手势
+    if (dt > 0.45 || fabs(dy) > 140.0) { [self reset]; return; }
+
+    // 左滑: 优先判定水平滑动, Y 轴偏移过大直接过滤 (右滑不做手势)
+    if (fabs(dx) >= 45.0) {
+        if (fabs(dy) <= 70.0 && fabs(dx) > fabs(dy) * 1.5 && dx < 0.0) {
+            MGEar ear = _beginEar;
+            [self reset];
+            MGDispatchAction(MGActionForGesture(ear, @"swipeLeft"));
+        } else {
+            [self reset];
+        }
         return;
     }
 
-    // 水平滑动手势
-    if (fabs(dx) >= 45.0 && fabs(dy) <= 70.0 && fabs(dx) > fabs(dy) * 1.5) {
-        [self reset];
-        NSString *key = (dx > 0.0) ? @"swipeRight" : @"swipeLeft";
-        MGDispatchAction(MGActionForGesture(key));
-        return;
-    }
-
-    // 点按手势 (位移很小才算一次 tap)
+    // 点按 (位移很小才算一次 tap)
     if (hypot(dx, dy) <= 30.0) {
-        _tapCount++;
-        [_mergeTimer invalidate];
-        _mergeTimer = nil;
+        MGEar ear = _beginEar;
 
-        if (_tapCount >= 3) { // 三击封顶, 直接触发
-            [self fireTapCount:_tapCount];
+        // 双击必须落在同一个耳朵区域, 跨耳朵点击重新计一次
+        if (_tapEar != ear || _tapCount == 0) {
+            _tapEar = ear;
+            _tapCount = 1;
+        } else {
+            _tapCount++;
+        }
+
+        // 同耳双击 → 直接触发
+        if (_tapCount >= 2) {
+            [self clearTapChain];
+            MGDispatchAction(MGActionForGesture(ear, @"doubleTap"));
             return;
         }
-        // 双击/三击都没绑定动作时, 单击零延迟触发;
-        // 否则等 0.32 秒把连续点击合并成双击/三击
-        BOOL hasDouble = MGActionEnabled(MGActionForGesture(@"doubleTap"));
-        BOOL hasTriple = MGActionEnabled(MGActionForGesture(@"tripleTap"));
-        if (_tapCount == 1 && !hasDouble && !hasTriple) {
-            [self fireTapCount:1];
-            return;
-        }
+
+        // 单击与双击都没绑定动作 → 不必计时, 直接结束
+        BOOL sEn = MGActionEnabled(MGActionForGesture(ear, @"singleTap"));
+        BOOL dEn = MGActionEnabled(MGActionForGesture(ear, @"doubleTap"));
+        if (!sEn && !dEn) { [self clearTapChain]; return; }
+
+        // 等用户设定的间隔, 看第二次点击是否落进来 (落不进来 = 单击)
+        [_mergeTimer invalidate];
+        NSTimeInterval interval = MGPrefFloat(@"tapInterval", 0.32);
+        if (interval < 0.20) interval = 0.20;
+        if (interval > 0.50) interval = 0.50;
         __weak MGTracker *ws = self;
-        _mergeTimer = [NSTimer scheduledTimerWithTimeInterval:0.32 repeats:NO block:^(NSTimer *tm) {
+        _mergeTimer = [NSTimer scheduledTimerWithTimeInterval:interval repeats:NO block:^(NSTimer *tm) {
             [ws mergeTimerFired:tm];
         }];
     } else {
         [self reset];
-    }
-}
-
-- (void)mergeTimerFired:(NSTimer *)tm
-{
-    _mergeTimer = nil;
-    NSUInteger n = _tapCount;
-    _tapCount = 0;
-    if (n > 0) {
-        NSString *key = (n >= 3) ? @"tripleTap" : (n == 2 ? @"doubleTap" : @"singleTap");
-        MGDispatchAction(MGActionForGesture(key));
     }
 }
 
@@ -317,15 +462,12 @@ static CGFloat MGStatusZoneHeight(UIWindow *w)
 
 - (void)sendEvent:(UIEvent *)event
 {
-    %orig; // 只观察, 不拦截, 不影响系统任何原有行为
+    %orig; // 只观察, 不拦截: 下滑/长按/三击/上滑等事件完整透传给系统
 
     @try {
         if (event.type != UIEventTypeTouches) return;
         NSSet *all = [event allTouches];
-        if (all.count != 1) { // 多指触摸一律忽略
-            [[MGTracker sharedTracker] reset];
-            return;
-        }
+        if (all.count != 1) { [[MGTracker sharedTracker] reset]; return; }
         UITouch *t = all.anyObject;
         if (!t) return;
 
@@ -354,12 +496,12 @@ static CGFloat MGStatusZoneHeight(UIWindow *w)
     @autoreleasepool {
         if (MGIsSpringBoard()) {
             CFNotificationCenterRef nc = CFNotificationCenterGetDarwinNotifyCenter();
-            for (NSString *a in @[@"lock", @"screenshot", @"respring", @"flashlight"]) {
+            for (NSString *a in @[@"lock", @"screenshot", @"respring", @"flashlight", @"home", @"settingspanel"]) {
                 CFNotificationCenterAddObserver(nc, NULL, MGDarwinCallback,
                     (__bridge CFStringRef)[kNotifyPrefix stringByAppendingString:a],
                     NULL, CFNotificationSuspensionBehaviorCoalesce);
             }
-            MGLog(@"已加载到 SpringBoard, 动作接收端就绪");
+            MGLog(@"已加载到 SpringBoard v0.1.0 (耳朵分区/刘海灵动岛丢弃/下滑透传)");
         }
     }
 }
