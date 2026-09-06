@@ -10,12 +10,14 @@
 
 #define MG_SUITE @"com.local.mygestures"
 
+// 真机 frida 反射实锤: PSSpecifier 类方法是 preferenceSpecifierNamed: (Named 不是 WithName!)
 static id MGNewSpec(id ctrl, NSString *name, id target, SEL set, SEL get, id detail, NSInteger cell)
 {
-    SEL sel = NSSelectorFromString(@"preferenceSpecifierWithName:target:set:get:detail:cell:edit:");
+    SEL sel = NSSelectorFromString(@"preferenceSpecifierNamed:target:set:get:detail:cell:edit:");
     id (*msg)(id, SEL, NSString *, id, SEL, SEL, id, NSInteger, NSInteger) =
         (id (*)(id, SEL, NSString *, id, SEL, SEL, id, NSInteger, NSInteger))objc_msgSend;
-    return msg(ctrl, sel, name, target, set, get, detail, cell, 0);
+    Class ps = objc_getClass("PSSpecifier");
+    return msg(ps, sel, name, target, set, get, detail, cell, 0);
 }
 
 // 应用显示名: 14.5 SDK 头文件未声明 localizedDisplayName, 运行时按候选方法名取
