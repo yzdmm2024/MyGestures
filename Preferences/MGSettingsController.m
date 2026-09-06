@@ -19,6 +19,7 @@
 @class MGPickerRSingleTap, MGPickerRDoubleTap, MGPickerRSwipeLeft;
 
 NSString *MGActionTitle(NSString *act); // 在 MGActionPickerController.m 中实现
+NSString *MGAppTitleForBid(NSString *bid); // 在 MGAppPickerController.m 中实现
 
 #pragma mark - 规格构建辅助 (SDK 头文件缺声明, 走 msgSend)
 
@@ -95,7 +96,7 @@ static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
 - (void)viewWillAppear:(BOOL)animated
 {
     [super viewWillAppear:animated];
-    self.title = @"我的手势 0.3.0";
+    self.title = @"我的手势 0.4.0";
     [self attachDiagramHeader];
 }
 
@@ -113,6 +114,7 @@ static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
     NSString *v = CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)key, (__bridge CFStringRef)MG_SUITE));
     if (![v isKindOfClass:[NSString class]] || v.length == 0) v = @"none";
     if ([v hasPrefix:@"link:"]) return [v substringFromIndex:5]; // 预设链接显示链接名称
+    if ([v hasPrefix:@"app:"]) return MGAppTitleForBid([v substringFromIndex:4]); // 打开应用显示应用名
     return MGActionTitle(v);
 }
 

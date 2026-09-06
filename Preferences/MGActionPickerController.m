@@ -10,6 +10,7 @@
 #define MG_SUITE @"com.local.mygestures"
 
 NSArray *MGLinksRead(void); // 在 MGLinksController.m 中实现
+NSString *MGAppTitleForBid(NSString *bid); // 在 MGAppPickerController.m 中实现
 
 static id MGNewSpec(id ctrl, NSString *name, id target, SEL set, SEL get, id detail, NSInteger cell)
 {
@@ -39,14 +40,27 @@ NSString *MGActionTitle(NSString *act)
         @"playpause":     @"播放/暂停音乐",
         @"nexttrack":     @"下一首",
         @"prevtrack":     @"上一首",
+        @"volup":         @"音量 +",
+        @"voldown":       @"音量 −",
+        @"mute":          @"静音",
+        @"appswitcher":   @"App切换器（多任务）",
+        @"camera":        @"相机",
+        @"wlan":          @"无线局域网",
+        @"cellular":      @"蜂窝网络",
     };
     return map[act] ?: act;
 }
 
-// 各手势类型允许的动作 (与原型一致: 左滑无"返回主屏幕", 双击/左滑无"打开设置面板")
-static NSArray *MGActsSingle(void) { return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home", @"settingspanel"]; }
-static NSArray *MGActsDouble(void) { return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home"]; }
-static NSArray *MGActsSwipe(void)  { return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring"]; }
+// 各手势类型允许的动作
+static NSArray *MGActsSingle(void) { return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home",
+    @"wifi", @"wlan", @"cellular", @"bluetooth", @"airplane", @"lowpower",
+    @"playpause", @"nexttrack", @"prevtrack", @"volup", @"voldown", @"mute", @"appswitcher", @"camera", @"settingspanel"]; }
+static NSArray *MGActsDouble(void) { return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home",
+    @"wifi", @"wlan", @"cellular", @"bluetooth", @"airplane", @"lowpower",
+    @"playpause", @"nexttrack", @"prevtrack", @"volup", @"voldown", @"mute", @"appswitcher", @"camera"]; }
+static NSArray *MGActsSwipe(void)  { return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home",
+    @"wifi", @"wlan", @"cellular", @"bluetooth", @"airplane", @"lowpower",
+    @"playpause", @"nexttrack", @"prevtrack", @"volup", @"voldown", @"mute", @"appswitcher", @"camera"]; }
 
 #pragma mark - 选择子页面基类
 
@@ -54,8 +68,11 @@ static NSArray *MGActsSwipe(void)  { return @[@"none", @"lock", @"screenshot", @
 + (NSString *)mgKey;
 + (NSString *)mgTitle;
 + (NSArray *)mgActions;
++ (NSString *)mgAppPickerClass;
 - (id)mgSwitchValue:(PSSpecifier *)spec;
 - (void)mgPickSwitch:(id)value specifier:(PSSpecifier *)spec;
+- (NSString *)currentValue;
+- (id)mgAppCurrentValue:(PSSpecifier *)spec;
 @end
 
 @implementation MGActionPickerController
@@ -78,8 +95,7 @@ static NSArray *MGActsSwipe(void)  { return @[@"none", @"lock", @"screenshot", @
 
         // 当前选中的动作
         NSString *key = [[self class] mgKey];
-        NSString *cur = CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)key, (__bridge CFStringRef)MG_SUITE));
-        if (![cur isKindOfClass:[NSString class]] || cur.length == 0) cur = @"none";
+        NSString *cur = [self currentValue];
 
         for (NSString *act in [[self class] mgActions]) {
             PSSpecifier *s = MGNewSpec(self, MGActionTitle(act), self,
@@ -88,43 +104,42 @@ static NSArray *MGActsSwipe(void)  { return @[@"none", @"lock", @"screenshot", @
             [m addObject:s];
         }
 
-        // ===== 打开链接分组: 列出「我的链接」里的全部预设 (radio 同款单选机制) =====
-        NSArray *links = MGLinksRead();
-        NSMutableArray *linkRows = [NSMutableArray array];
-        for (NSDictionary *d in links) {
-            if ([d isKindOfClass:[NSDictionary class]] &&
-                [d[@"n"] isKindOfClass:[NSString class]] && [d[@"n"] length] > 0 &&
-                [d[@"u"] isKindOfClass:[NSString class]] && [d[@"u"] length] > 0) {
-                [linkRows addObject:d];
-            }
-        }
-        PSSpecifier *lg = MGNewSpec(self, @"打开链接", nil, NULL, NULL, nil, PSGroupCell);
-        [lg setProperty:@"打开链接" forKey:@"label"];
-        [lg setProperty:linkRows.count
-            ? @"点开开关即选中该链接（其余自动关闭）。链接在「我的链接」里维护。"
-            : @"还没有预设链接。返回后进入「我的链接」添加（支持 shortcuts:// 运行快捷指令、weixin:// 等任意 scheme）。"
-            forKey:@"footerText"];
-        [m addObject:lg];
-        for (NSDictionary *d in linkRows) {
-            NSString *value = [@"link:" stringByAppendingString:d[@"n"]];
-            PSSpecifier *s = MGNewSpec(self, d[@"n"], self,
-                @selector(mgPickSwitch:specifier:), @selector(mgSwitchValue:), nil, PSSwitchCell);
-            [s setProperty:value forKey:@"mgAction"];
-            [m addObject:s];
-        }
+        // ===== 打开应用: 进入按手势独立的应用选择页 (搜索+图标+单选) =====
+        // ===== 打开应用: 进入按手势独立的应用选择页 (搜索+图标+单选) =====
+        PSSpecifier *ag = MGNewSpec(self, @"打开应用", nil, NULL, NULL, nil, PSGroupCell);
+        [ag setProperty:@"打开应用" forKey:@"label"];
+        [ag setProperty:@"点击「打开应用…」进入应用选择页（含搜索与图标，含苹果预装与 App Store 应用），选中后手势执行时打开该应用。" forKey:@"footerText"];
+        [m addObject:ag];
+        PSSpecifier *appRow = MGNewSpec(self, @"打开应用…", self,
+            NULL, @selector(mgAppCurrentValue:), NSClassFromString([[self class] mgAppPickerClass]), PSLinkCell);
+        [appRow setProperty:NSClassFromString([[self class] mgAppPickerClass]) forKey:@"detail"];
+        [m addObject:appRow];
 
         _specifiers = [m copy];
     }
     return _specifiers;
 }
 
+// 「打开应用…」行右侧显示当前绑定的应用名 (未绑定则不显示)
+- (id)mgAppCurrentValue:(PSSpecifier *)spec
+{
+    NSString *cur = [self currentValue];
+    if ([cur hasPrefix:@"app:"]) return MGAppTitleForBid([cur substringFromIndex:4]);
+    return nil;
+}
+
 // 开关状态: 当前动作 == 本行动作
-- (id)mgSwitchValue:(PSSpecifier *)spec
+- (NSString *)currentValue
 {
     NSString *key = [[self class] mgKey];
     NSString *cur = CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)key, (__bridge CFStringRef)MG_SUITE));
     if (![cur isKindOfClass:[NSString class]] || cur.length == 0) cur = @"none";
-    return @([cur isEqualToString:[spec propertyForKey:@"mgAction"]]);
+    return cur;
+}
+
+- (id)mgSwitchValue:(PSSpecifier *)spec
+{
+    return @([[self currentValue] isEqualToString:[spec propertyForKey:@"mgAction"]]);
 }
 
 // 单选: 打开一项写入手势键并刷新(其余自动关闭); 关掉当前项 → 变「无」
@@ -144,23 +159,24 @@ static NSArray *MGActsSwipe(void)  { return @[@"none", @"lock", @"screenshot", @
 
 #pragma mark - 每个手势一个子类 (声明编辑键/标题/允许动作, 免去传参依赖)
 
-#define MG_PICKER_CLASS(CNAME, KEY, TITLE, ACTS) \
+#define MG_PICKER_CLASS(CNAME, KEY, TITLE, ACTS, APPCLS) \
 @interface CNAME : MGActionPickerController @end \
 @implementation CNAME \
 + (NSString *)mgKey { return KEY; } \
 + (NSString *)mgTitle { return TITLE; } \
 + (NSArray *)mgActions { return ACTS; } \
++ (NSString *)mgAppPickerClass { return APPCLS; } \
 @end
 
 // 不分段模式 (左右耳朵共用)
-MG_PICKER_CLASS(MGPickerSingleTap,  @"singleTap",  @"单击动作", MGActsSingle())
-MG_PICKER_CLASS(MGPickerDoubleTap,  @"doubleTap",  @"双击动作", MGActsDouble())
-MG_PICKER_CLASS(MGPickerSwipeLeft,  @"swipeLeft",  @"左滑动作", MGActsSwipe())
+MG_PICKER_CLASS(MGPickerSingleTap,  @"singleTap",  @"单击动作", MGActsSingle(), @"MGAppPickerSingleTap")
+MG_PICKER_CLASS(MGPickerDoubleTap,  @"doubleTap",  @"双击动作", MGActsDouble(), @"MGAppPickerDoubleTap")
+MG_PICKER_CLASS(MGPickerSwipeLeft,  @"swipeLeft",  @"左滑动作", MGActsSwipe(), @"MGAppPickerSwipeLeft")
 // 分段模式 - 左段 (时间侧)
-MG_PICKER_CLASS(MGPickerLSingleTap, @"left_singleTap",  @"左段·单击动作", MGActsSingle())
-MG_PICKER_CLASS(MGPickerLDoubleTap, @"left_doubleTap",  @"左段·双击动作", MGActsDouble())
-MG_PICKER_CLASS(MGPickerLSwipeLeft, @"left_swipeLeft",  @"左段·左滑动作", MGActsSwipe())
+MG_PICKER_CLASS(MGPickerLSingleTap, @"left_singleTap",  @"左段·单击动作", MGActsSingle(), @"MGAppPickerLSingleTap")
+MG_PICKER_CLASS(MGPickerLDoubleTap, @"left_doubleTap",  @"左段·双击动作", MGActsDouble(), @"MGAppPickerLDoubleTap")
+MG_PICKER_CLASS(MGPickerLSwipeLeft, @"left_swipeLeft",  @"左段·左滑动作", MGActsSwipe(), @"MGAppPickerLSwipeLeft")
 // 分段模式 - 右段 (电池信号侧)
-MG_PICKER_CLASS(MGPickerRSingleTap, @"right_singleTap", @"右段·单击动作", MGActsSingle())
-MG_PICKER_CLASS(MGPickerRDoubleTap, @"right_doubleTap", @"右段·双击动作", MGActsDouble())
-MG_PICKER_CLASS(MGPickerRSwipeLeft, @"right_swipeLeft", @"右段·左滑动作", MGActsSwipe())
+MG_PICKER_CLASS(MGPickerRSingleTap, @"right_singleTap", @"右段·单击动作", MGActsSingle(), @"MGAppPickerRSingleTap")
+MG_PICKER_CLASS(MGPickerRDoubleTap, @"right_doubleTap", @"右段·双击动作", MGActsDouble(), @"MGAppPickerRDoubleTap")
+MG_PICKER_CLASS(MGPickerRSwipeLeft, @"right_swipeLeft", @"右段·左滑动作", MGActsSwipe(), @"MGAppPickerRSwipeLeft")
