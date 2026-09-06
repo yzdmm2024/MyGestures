@@ -20,7 +20,7 @@ MyGestures_FRAMEWORKS = UIKit Foundation CoreGraphics AVFoundation QuartzCore
 # 入口 plist：layout/Library/PreferenceLoader/Preferences/MyGesturesPrefs.plist
 # Info/Root：layout/Library/PreferenceBundles/MyGesturesPrefs.bundle/（<Bundle>_RESOURCES 声明不生效，必须手放）
 BUNDLE_NAME = MyGesturesPrefs
-MyGesturesPrefs_FILES = Preferences/MGSettingsController.m Preferences/MGBlacklistController.m
+MyGesturesPrefs_FILES = Preferences/MGSettingsController.m Preferences/MGBlacklistController.m Preferences/MGActionPickerController.m
 MyGesturesPrefs_INSTALL_PATH = /Library/PreferenceBundles
 MyGesturesPrefs_FRAMEWORKS = UIKit Foundation QuartzCore
 # 坑E：必须显式链接 Preferences（chained fixups 下 dynamic_lookup 会被 dyld 拒载）

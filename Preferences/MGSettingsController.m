@@ -1,8 +1,9 @@
-// MyGestures 设置面板主控制器 v0.1.0
-// 功能: 顶部状态栏示意图(绿耳朵/红遮挡区) + 分区模式条件显隐 + 全局设置项
+// MyGestures 设置面板主控制器 v0.1.3
+// 顶部状态栏示意图(绿耳朵/红遮挡区) + 分区模式条件显隐 + 全局设置项
+// 手势行 = PSLinkCell: 右侧显示当前动作(get:), 带箭头, 点击推入动作选择子页面
 // 面板沿用「系统-设置出现面板菜单的方法」已验证方案:
 //   只 import <Preferences/Preferences.h>、PSListController 子类
-// 注: 14.5 SDK 头文件未声明 preferenceSpecifierWithName:... , 用 objc_msgSend 动态调用
+// 注: 14.5 SDK 头文件未声明 preferenceSpecifierNamed:... , 用 objc_msgSend 动态调用
 #import <Preferences/Preferences.h>
 #import <UIKit/UIKit.h>
 #import <objc/message.h>
@@ -11,6 +12,11 @@
 #define MG_SUITE @"com.local.mygestures"
 
 @class MGBlacklistController;
+@class MGPickerSingleTap, MGPickerDoubleTap, MGPickerSwipeLeft;
+@class MGPickerLSingleTap, MGPickerLDoubleTap, MGPickerLSwipeLeft;
+@class MGPickerRSingleTap, MGPickerRDoubleTap, MGPickerRSwipeLeft;
+
+NSString *MGActionTitle(NSString *act); // 在 MGActionPickerController.m 中实现
 
 #pragma mark - 规格构建辅助 (SDK 头文件缺声明, 走 msgSend)
 
@@ -23,37 +29,6 @@ static id MGNewSpec(id ctrl, NSString *name, id target, SEL set, SEL get, id det
     Class ps = objc_getClass("PSSpecifier");
     return msg(ps, sel, name, target, set, get, detail, cell, 0);
 }
-
-#pragma mark - 动作选项表
-
-// 单击可用全部动作(含"打开设置面板")
-static NSArray *MGValuesSingle(void) {
-    return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home", @"settingspanel"];
-}
-// 双击/左滑不含"打开设置面板"
-static NSArray *MGValuesDouble(void) {
-    return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home"];
-}
-// 左滑不含"返回主屏幕"(与原型一致)
-static NSArray *MGValuesSwipe(void) {
-    return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring"];
-}
-static NSArray *MGTitles(NSArray *values) {
-    NSDictionary *map = @{
-        @"none":          @"无",
-        @"lock":          @"锁屏",
-        @"screenshot":    @"截屏",
-        @"flashlight":    @"手电筒开关",
-        @"respring":      @"Respring注销",
-        @"home":          @"返回主屏幕",
-        @"settingspanel": @"打开本工具设置面板",
-    };
-    NSMutableArray *t = [NSMutableArray array];
-    for (NSString *v in values) [t addObject:map[v] ?: v];
-    return t;
-}
-
-#pragma mark - 规格构建
 
 // 把出厂默认值固化进偏好, 让面板首次打开就显示默认选中项 (tweak 侧同值, 两侧一致)
 static void MGEnsureDefault(NSString *key, id value)
@@ -81,15 +56,12 @@ static PSSpecifier *MGSwitch(id ctrl, NSString *name, NSString *key)
     return s;
 }
 
-static PSSpecifier *MGSelect(id ctrl, NSString *name, NSString *key, NSString *def, NSArray *values)
+// 手势行: PSLinkCell + 箭头, 右侧实时显示当前动作 (get:), 点击推入动作选择子页面
+static PSSpecifier *MGLink(id ctrl, NSString *name, NSString *key, Class picker)
 {
-    PSSpecifier *s = MGNewSpec(ctrl, name, nil,
-        @selector(setPreferenceValue:specifier:), @selector(readPreferenceValue:), nil, PSListItemCell);
-    [s setProperty:MG_SUITE forKey:@"defaults"];
-    [s setProperty:key forKey:@"key"];
-    [s setProperty:def forKey:@"default"];
-    [s setProperty:values forKey:@"validValues"];
-    [s setProperty:MGTitles(values) forKey:@"validTitles"];
+    PSSpecifier *s = MGNewSpec(ctrl, name, ctrl,
+        NULL, @selector(mgCurrentValue:), picker, PSLinkCell);
+    [s setProperty:key forKey:@"mgKey"];
     return s;
 }
 
@@ -107,41 +79,12 @@ static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
     return s;
 }
 
-#pragma mark - PSListController 偏好桥接 (闪退修复)
-
-// iOS 16 的 PSListController 不自带 readPreferenceValue:/setPreferenceValue:specifier:,
-// 必须自己提供 (按 specifier 的 defaults/key 属性读写 CFPreferences)。
-// 缺了它建 cell 时消息转发 -> doesNotRecognizeSelector -> SIGABRT 闪退 (真机崩溃日志实锤)。
-@implementation PSListController (MGPrefsBridge)
-
-- (id)readPreferenceValue:(PSSpecifier *)specifier
-{
-    NSString *key = [specifier propertyForKey:@"key"];
-    if (!key.length) return nil;
-    NSString *suite = [specifier propertyForKey:@"defaults"];
-    if (!suite.length) suite = MG_SUITE;
-    id v = CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)key, (__bridge CFStringRef)suite));
-    if (!v) v = [specifier propertyForKey:@"default"];
-    return v;
-}
-
-- (void)setPreferenceValue:(id)value specifier:(PSSpecifier *)specifier
-{
-    NSString *key = [specifier propertyForKey:@"key"];
-    if (!key.length) return;
-    NSString *suite = [specifier propertyForKey:@"defaults"];
-    if (!suite.length) suite = MG_SUITE;
-    CFPreferencesSetAppValue((__bridge CFStringRef)key, (__bridge CFTypeRef)value, (__bridge CFStringRef)suite);
-    CFPreferencesAppSynchronize((__bridge CFStringRef)suite);
-}
-
-@end
-
 #pragma mark - 主控制器
 
 @interface MGSettingsController : PSListController
 - (id)readSplitMode:(PSSpecifier *)spec;
 - (void)setSplitMode:(id)value specifier:(PSSpecifier *)spec;
+- (id)mgCurrentValue:(PSSpecifier *)spec;
 @end
 
 @implementation MGSettingsController
@@ -149,8 +92,14 @@ static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
 - (void)viewWillAppear:(BOOL)animated
 {
     [super viewWillAppear:animated];
-    self.title = @"我的手势 0.1.2";
+    self.title = @"我的手势 0.1.3";
     [self attachDiagramHeader];
+}
+
+// 从动作选择子页面返回时刷新右侧当前值
+- (BOOL)shouldReloadSpecifiersOnResume
+{
+    return YES;
 }
 
 - (NSArray *)specifiers
@@ -178,21 +127,21 @@ static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
 
         if (!splitOn) {
             // ===== 模式1: 左右耳朵共用 =====
-            [m addObject:MGGroup(self, @"公共手势（左右耳朵共用）", @"手势选「无」代表单独禁用该手势，无需关闭整个插件。\n长按、三击、上滑、下滑始终交给系统，不占用。")];
-            [m addObject:MGSelect(self, @"单击", @"singleTap", @"none", MGValuesSingle())];
-            [m addObject:MGSelect(self, @"双击", @"doubleTap", @"lock", MGValuesDouble())];
-            [m addObject:MGSelect(self, @"左滑", @"swipeLeft", @"flashlight", MGValuesSwipe())];
+            [m addObject:MGGroup(self, @"公共手势（左右耳朵共用）", @"点击任意一行进入动作选择页，点选后立即生效并返回。\n手势选「无」代表单独禁用该手势，无需关闭整个插件。\n长按、三击、上滑、下滑始终交给系统，不占用。")];
+            [m addObject:MGLink(self, @"单击", @"singleTap", [MGPickerSingleTap class])];
+            [m addObject:MGLink(self, @"双击", @"doubleTap", [MGPickerDoubleTap class])];
+            [m addObject:MGLink(self, @"左滑", @"swipeLeft", [MGPickerSwipeLeft class])];
         } else {
             // ===== 模式2: 左右分段独立 =====
             [m addObject:MGGroup(self, @"状态栏‑左段｜时间侧", @"刘海/灵动岛左侧的耳朵区域，只在此区域内生效。")];
-            [m addObject:MGSelect(self, @"单击", @"left_singleTap", @"none", MGValuesSingle())];
-            [m addObject:MGSelect(self, @"双击", @"left_doubleTap", @"lock", MGValuesDouble())];
-            [m addObject:MGSelect(self, @"左滑", @"left_swipeLeft", @"flashlight", MGValuesSwipe())];
+            [m addObject:MGLink(self, @"单击", @"left_singleTap", [MGPickerLSingleTap class])];
+            [m addObject:MGLink(self, @"双击", @"left_doubleTap", [MGPickerLDoubleTap class])];
+            [m addObject:MGLink(self, @"左滑", @"left_swipeLeft", [MGPickerLSwipeLeft class])];
 
             [m addObject:MGGroup(self, @"状态栏‑右段｜电池信号侧", @"刘海/灵动岛右侧的耳朵区域（信号/Wi‑Fi/电池），只在此区域内生效。")];
-            [m addObject:MGSelect(self, @"单击", @"right_singleTap", @"none", MGValuesSingle())];
-            [m addObject:MGSelect(self, @"双击", @"right_doubleTap", @"lock", MGValuesDouble())];
-            [m addObject:MGSelect(self, @"左滑", @"right_swipeLeft", @"flashlight", MGValuesSwipe())];
+            [m addObject:MGLink(self, @"单击", @"right_singleTap", [MGPickerRSingleTap class])];
+            [m addObject:MGLink(self, @"双击", @"right_doubleTap", [MGPickerRDoubleTap class])];
+            [m addObject:MGLink(self, @"左滑", @"right_swipeLeft", [MGPickerRSwipeLeft class])];
         }
 
         // ===== 全局设置 =====
@@ -224,6 +173,16 @@ static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
     CFPreferencesAppSynchronize((__bridge CFStringRef)MG_SUITE);
     _specifiers = nil;
     [self reloadSpecifiers];
+}
+
+// 手势行右侧的当前动作文字 (主页面 get:)
+- (id)mgCurrentValue:(PSSpecifier *)spec
+{
+    NSString *key = [spec propertyForKey:@"mgKey"];
+    if (!key.length) return nil;
+    id v = CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)key, (__bridge CFStringRef)MG_SUITE));
+    if (![v isKindOfClass:[NSString class]] || !v.length) v = @"none";
+    return MGActionTitle(v);
 }
 
 #pragma mark - 顶部示意图 (绿耳朵 / 红遮挡区)
@@ -302,6 +261,36 @@ static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
     } @catch (NSException *e) {
         NSLog(@"[MyGestures] 示意图构建失败(不影响设置功能): %@", e);
     }
+}
+
+@end
+
+#pragma mark - PSListController 偏好桥接 (闪退修复)
+
+// iOS 16 的 PSListController 不自带 readPreferenceValue:/setPreferenceValue:specifier:,
+// 必须自己提供 (按 specifier 的 defaults/key 属性读写 CFPreferences)。
+// 缺了它建 cell 时消息转发 -> doesNotRecognizeSelector -> SIGABRT 闪退 (真机崩溃日志实锤)。
+@implementation PSListController (MGPrefsBridge)
+
+- (id)readPreferenceValue:(PSSpecifier *)specifier
+{
+    NSString *key = [specifier propertyForKey:@"key"];
+    if (!key.length) return nil;
+    NSString *suite = [specifier propertyForKey:@"defaults"];
+    if (!suite.length) suite = MG_SUITE;
+    id v = CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)key, (__bridge CFStringRef)suite));
+    if (!v) v = [specifier propertyForKey:@"default"];
+    return v;
+}
+
+- (void)setPreferenceValue:(id)value specifier:(PSSpecifier *)specifier
+{
+    NSString *key = [specifier propertyForKey:@"key"];
+    if (!key.length) return;
+    NSString *suite = [specifier propertyForKey:@"defaults"];
+    if (!suite.length) suite = MG_SUITE;
+    CFPreferencesSetAppValue((__bridge CFStringRef)key, (__bridge CFTypeRef)value, (__bridge CFStringRef)suite);
+    CFPreferencesAppSynchronize((__bridge CFStringRef)suite);
 }
 
 @end
