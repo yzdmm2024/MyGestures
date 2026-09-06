@@ -14,7 +14,7 @@ include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = MyGestures
 MyGestures_FILES = Tweak.x
 MyGestures_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -w
-MyGestures_FRAMEWORKS = UIKit Foundation CoreGraphics AVFoundation QuartzCore AudioToolbox
+MyGestures_FRAMEWORKS = UIKit Foundation CoreGraphics AVFoundation QuartzCore AudioToolbox CoreHaptics
 
 # ===== 设置面板 PreferenceBundle =====
 # 入口 plist：layout/Library/PreferenceLoader/Preferences/MyGesturesPrefs.plist

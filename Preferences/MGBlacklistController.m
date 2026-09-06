@@ -1,7 +1,6 @@
-// MyGestures App黑名单子页面 v0.1.0
-// 枚举已安装 App, 每行一个开关: 开 = 加入黑名单 (偏好键 bl_<bundleid>)
-// tweak 侧在每个 App 进程内读同键判断, 黑名单内全部状态栏手势失效
-// 注: 14.5 SDK 头文件未声明 preferenceSpecifierWithName:... , 用 objc_msgSend 动态调用
+// MyGestures App黑名单子页面 v0.3.0
+// 枚举已安装 App (16.6: allInstalledApplications), 每行开关 + App图标 + 顶部搜索栏
+// 开关打开 = 加入黑名单 (偏好键 bl_<bundleid>), tweak 侧同键判断
 #import <Preferences/Preferences.h>
 #import <UIKit/UIKit.h>
 #import <MobileCoreServices/MobileCoreServices.h>
@@ -10,7 +9,6 @@
 
 #define MG_SUITE @"com.local.mygestures"
 
-// 真机 frida 反射实锤: PSSpecifier 类方法是 preferenceSpecifierNamed: (Named 不是 WithName!)
 static id MGNewSpec(id ctrl, NSString *name, id target, SEL set, SEL get, id detail, NSInteger cell)
 {
     SEL sel = NSSelectorFromString(@"preferenceSpecifierNamed:target:set:get:detail:cell:edit:");
@@ -20,7 +18,7 @@ static id MGNewSpec(id ctrl, NSString *name, id target, SEL set, SEL get, id det
     return msg(ps, sel, name, target, set, get, detail, cell, 0);
 }
 
-// 应用显示名: 14.5 SDK 头文件未声明 localizedDisplayName, 运行时按候选方法名取
+// 应用显示名: 运行时按候选方法名取 (14.5 SDK 头文件未声明 localizedDisplayName)
 static NSString *MGAppName(id app)
 {
     for (NSString *selName in @[@"localizedDisplayName", @"localizedName"]) {
@@ -33,7 +31,40 @@ static NSString *MGAppName(id app)
     return nil;
 }
 
-@interface MGBlacklistController : PSListController
+// 从 App 包内读图标文件 (Info.plist → CFBundleIcons → CFBundleIconFiles)
+static UIImage *MGIconFromBundlePath(NSString *appPath)
+{
+    if (!appPath.length) return nil;
+    NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:[appPath stringByAppendingPathComponent:@"Info.plist"]];
+    if (![info isKindOfClass:[NSDictionary class]]) return nil;
+    NSString *name = nil;
+    NSDictionary *icons = info[@"CFBundleIcons"];
+    if ([icons isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *primary = icons[@"CFBundlePrimaryIcon"];
+        if ([primary isKindOfClass:[NSDictionary class]]) {
+            NSArray *files = primary[@"CFBundleIconFiles"];
+            if ([files isKindOfClass:[NSArray class]] && files.count > 0) name = files.lastObject;
+        }
+    }
+    if (!name.length) name = info[@"CFBundleIconFile"];
+    if (!name.length) return nil;
+    for (NSString *cand in @[[name stringByAppendingPathExtension:@"png"],
+                             [NSString stringWithFormat:@"%@@3x.png", name],
+                             [NSString stringWithFormat:@"%@@2x.png", name],
+                             name]) {
+        UIImage *img = [UIImage imageWithContentsOfFile:[appPath stringByAppendingPathComponent:cand]];
+        if (img) return img;
+    }
+    return nil;
+}
+
+@interface MGBlacklistController : PSListController <UISearchBarDelegate>
+{
+    NSArray *_rows;          // @[ @[名称, 包id, 包路径], ... ] 全量
+    NSMutableDictionary *_iconCache; // bid → UIImage
+    NSString *_searchText;
+    BOOL _searchBarInstalled;
+}
 @end
 
 @implementation MGBlacklistController
@@ -42,6 +73,97 @@ static NSString *MGAppName(id app)
 {
     [super viewWillAppear:animated];
     self.title = @"App黑名单";
+    if (!_searchBarInstalled) {
+        [self installSearchBar];
+        _searchBarInstalled = YES;
+    }
+}
+
+- (void)installSearchBar
+{
+    @try {
+        UITableView *tv = nil;
+        if ([self respondsToSelector:@selector(table)]) {
+            tv = ((id (*)(id, SEL))objc_msgSend)(self, @selector(table));
+        }
+        if (!tv) return;
+        CGFloat w = tv.frame.size.width;
+        if (w < 100.0) w = 340.0;
+        UISearchBar *bar = [[UISearchBar alloc] initWithFrame:CGRectMake(0, 0, w, 44)];
+        bar.placeholder = @"搜索应用";
+        bar.delegate = self;
+        bar.barStyle = UIBarStyleDefault;
+        tv.tableHeaderView = bar;
+    } @catch (NSException *e) {
+        NSLog(@"[MyGestures] 搜索栏安装失败: %@", e);
+    }
+}
+
+- (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText
+{
+    _searchText = [searchText copy];
+    _specifiers = nil;
+    [self reloadSpecifiers];
+}
+
+- (void)searchBarSearchButtonClicked:(UISearchBar *)searchBar
+{
+    [searchBar resignFirstResponder];
+}
+
+- (NSArray *)allRows
+{
+    if (!_rows) {
+        NSMutableArray *rows = [NSMutableArray array];
+        @try {
+            Class wsClass = objc_getClass("LSApplicationWorkspace");
+            if (wsClass) {
+                id ws = ((id (*)(id, SEL))objc_msgSend)(wsClass, @selector(defaultWorkspace));
+                NSArray *apps = nil;
+                if (ws) {
+                    // 16.6: allInstalledApplications; 老系统名一并兜底
+                    for (NSString *selName in @[@"allInstalledApplications", @"allInstalledApps", @"installedApps"]) {
+                        SEL s = NSSelectorFromString(selName);
+                        if ([ws respondsToSelector:s]) {
+                            apps = ((NSArray *(*)(id, SEL))objc_msgSend)(ws, s);
+                            if (apps.count > 0) break;
+                        }
+                    }
+                }
+                for (id app in apps ?: @[]) {
+                    @try {
+                        NSString *bid = [app respondsToSelector:@selector(bundleIdentifier)] ? [app bundleIdentifier] : nil;
+                        NSString *name = bid.length ? (MGAppName(app) ?: bid) : nil;
+                        if (!bid.length || !name.length) continue;
+                        NSString *bundlePath = nil;
+                        if ([app respondsToSelector:@selector(bundleURL)]) {
+                            NSURL *u = [app bundleURL];
+                            bundlePath = u ? u.path : nil;
+                        }
+                        [rows addObject:@[name, bid, bundlePath ?: @""]];
+                    } @catch (NSException *e) { /* 跳过异常项 */ }
+                }
+            }
+        } @catch (NSException *e) {
+            NSLog(@"[MyGestures] 枚举应用失败: %@", e);
+        }
+        [rows sortUsingComparator:^NSComparisonResult(NSArray *a, NSArray *b) {
+            return [a[0] compare:b[0] options:NSNumericSearch | NSCaseInsensitiveSearch];
+        }];
+        _rows = [rows copy];
+    }
+    return _rows;
+}
+
+- (UIImage *)iconForRow:(NSArray *)row
+{
+    NSString *bid = row[1];
+    UIImage *img = _iconCache[bid];
+    if (img) return img;
+    img = MGIconFromBundlePath(row[2]);
+    if (!img) img = [UIImage new]; // 占位, 避免重复读盘
+    _iconCache[bid] = img;
+    return img;
 }
 
 - (NSArray *)specifiers
@@ -54,41 +176,13 @@ static NSString *MGAppName(id app)
         [g setProperty:@"开关打开 = 加入黑名单，该 App 内全部状态栏手势失效。默认全部关闭（都可用）。\n主界面（SpringBoard）不受黑名单影响。" forKey:@"footerText"];
         [m addObject:g];
 
-        // 枚举已安装应用: LSApplicationWorkspace (16.6 方法名为 allInstalledApplications)
-        NSMutableArray *rows = [NSMutableArray array];
-        @try {
-            Class wsClass = objc_getClass("LSApplicationWorkspace");
-            if (wsClass) {
-                id ws = ((id (*)(id, SEL))objc_msgSend)(wsClass, @selector(defaultWorkspace));
-                NSArray *apps = nil;
-                if (ws) {
-                    // 16.6: allInstalledApplications; 老系统名 allInstalledApps 一并兜底
-                    for (NSString *selName in @[@"allInstalledApplications", @"allInstalledApps", @"installedApps"]) {
-                        SEL s = NSSelectorFromString(selName);
-                        if ([ws respondsToSelector:s]) {
-                            apps = ((NSArray *(*)(id, SEL))objc_msgSend)(ws, s);
-                            if (apps.count > 0) break;
-                        }
-                    }
-                }
-                for (id app in apps ?: @[]) {
-                    @try {
-                        NSString *bid = [app respondsToSelector:@selector(bundleIdentifier)] ? [app bundleIdentifier] : nil;
-                        // 显示名缺失时用包名兜底, 不再丢弃 (修复黑名单列表不全)
-                        NSString *name = bid.length ? (MGAppName(app) ?: bid) : nil;
-                        if (bid.length && name.length) [rows addObject:@[name, bid]];
-                    } @catch (NSException *e) { /* 跳过异常项 */ }
-                }
+        NSString *q = [_searchText lowercaseString];
+        for (NSArray *row in [self allRows]) {
+            if (q.length > 0) {
+                NSString *name = [row[0] lowercaseString];
+                NSString *bid = [row[1] lowercaseString];
+                if (![name containsString:q] && ![bid containsString:q]) continue;
             }
-        } @catch (NSException *e) {
-            NSLog(@"[MyGestures] 枚举应用失败: %@", e);
-        }
-
-        [rows sortUsingComparator:^NSComparisonResult(NSArray *a, NSArray *b) {
-            return [a[0] compare:b[0] options:NSNumericSearch | NSCaseInsensitiveSearch];
-        }];
-
-        for (NSArray *row in rows) {
             PSSpecifier *s = MGNewSpec(self, row[0], nil,
                 @selector(setPreferenceValue:specifier:), @selector(readPreferenceValue:), nil, PSSwitchCell);
             [s setProperty:MG_SUITE forKey:@"defaults"];
@@ -99,6 +193,31 @@ static NSString *MGAppName(id app)
         _specifiers = [m copy];
     }
     return _specifiers;
+}
+
+// 在系统生成的开关 cell 上补画 App 图标 (行文本匹配到行模型)
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    struct objc_super sup = { self, class_getSuperclass([MGBlacklistController class]) };
+    UITableViewCell *cell = ((id (*)(struct objc_super *, SEL, id, id))objc_msgSendSuper)(
+        &sup, @selector(tableView:cellForRowAtIndexPath:), tableView, indexPath);
+    @try {
+        NSString *text = cell.textLabel.text;
+        if (text.length) {
+            for (NSArray *row in [self allRows]) {
+                if ([row[0] isEqualToString:text]) {
+                    UIImage *img = [self iconForRow:row];
+                    if (img && img.size.width > 0) {
+                        cell.imageView.image = img;
+                        cell.imageView.layer.cornerRadius = 6.0;
+                        cell.imageView.clipsToBounds = YES;
+                    }
+                    break;
+                }
+            }
+        }
+    } @catch (NSException *e) {}
+    return cell;
 }
 
 @end
