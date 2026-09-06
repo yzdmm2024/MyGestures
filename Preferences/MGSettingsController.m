@@ -13,23 +13,11 @@
 #define MG_SUITE @"com.local.mygestures"
 
 @class MGBlacklistController;
+@class MGPickerSingleTap, MGPickerDoubleTap, MGPickerSwipeLeft;
+@class MGPickerLSingleTap, MGPickerLDoubleTap, MGPickerLSwipeLeft;
+@class MGPickerRSingleTap, MGPickerRDoubleTap, MGPickerRSwipeLeft;
 
 NSString *MGActionTitle(NSString *act); // 在 MGActionPickerController.m 中实现
-
-// 各手势类型的可选动作 (面板=仅单击; 其余动作全部手势可用)
-static NSArray *MGValsSingle(void) {
-    return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home",
-             @"wifi", @"bluetooth", @"airplane", @"lowpower", @"playpause", @"nexttrack", @"prevtrack",
-             @"settingspanel"];
-}
-static NSArray *MGValsDouble(void) {
-    return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home",
-             @"wifi", @"bluetooth", @"airplane", @"lowpower", @"playpause", @"nexttrack", @"prevtrack"];
-}
-static NSArray *MGValsSwipe(void) {
-    return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home",
-             @"wifi", @"bluetooth", @"airplane", @"lowpower", @"playpause", @"nexttrack", @"prevtrack"];
-}
 
 #pragma mark - 规格构建辅助 (SDK 头文件缺声明, 走 msgSend)
 
@@ -69,20 +57,13 @@ static PSSpecifier *MGSwitch(id ctrl, NSString *name, NSString *key)
     return s;
 }
 
-// 手势行: PSListItemCell 内嵌下拉 — 点行弹出原生选择菜单, 右侧实时显示当前值
-static PSSpecifier *MGList(id ctrl, NSString *name, NSString *key, NSArray *values)
+// 手势行: PSLinkCell(黑名单同款, 真机验证可跳转子页) + 右侧显示当前动作(get:) + 子页面选择
+static PSSpecifier *MGLink(id ctrl, NSString *name, NSString *key, Class picker)
 {
-    PSSpecifier *s = MGNewSpec(ctrl, name, nil,
-        @selector(setPreferenceValue:specifier:), @selector(readPreferenceValue:), nil, PSListItemCell);
-    [s setProperty:MG_SUITE forKey:@"defaults"];
-    [s setProperty:key forKey:@"key"];
-    NSMutableArray *titles = [NSMutableArray array];
-    for (NSString *v in values) [titles addObject:MGActionTitle(v)];
-    // setValues:titles: 运行时存在但头文件未声明, 走 msgSend
-    SEL svSel = NSSelectorFromString(@"setValues:titles:");
-    void (*msgSVT)(id, SEL, NSArray *, NSArray *) =
-        (void (*)(id, SEL, NSArray *, NSArray *))objc_msgSend;
-    msgSVT(s, svSel, values, titles);
+    PSSpecifier *s = MGNewSpec(ctrl, name, ctrl,
+        NULL, @selector(mgCurrentValue:), picker, PSLinkCell);
+    [s setProperty:key forKey:@"mgKey"];
+    [s setProperty:picker forKey:@"detail"]; // 双保险: 属性里也放 detail
     return s;
 }
 
@@ -105,6 +86,7 @@ static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
 @interface MGSettingsController : PSListController
 - (id)readSplitMode:(PSSpecifier *)spec;
 - (void)setSplitMode:(id)value specifier:(PSSpecifier *)spec;
+- (id)mgCurrentValue:(PSSpecifier *)spec;
 @end
 
 @implementation MGSettingsController
@@ -112,8 +94,24 @@ static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
 - (void)viewWillAppear:(BOOL)animated
 {
     [super viewWillAppear:animated];
-    self.title = @"我的手势 0.1.4";
+    self.title = @"我的手势 0.1.5";
     [self attachDiagramHeader];
+}
+
+// 从动作选择子页面返回时刷新右侧当前值
+- (BOOL)shouldReloadSpecifiersOnResume
+{
+    return YES;
+}
+
+// 手势行右侧当前动作 (get:)
+- (id)mgCurrentValue:(PSSpecifier *)spec
+{
+    NSString *key = [spec propertyForKey:@"mgKey"];
+    if (!key.length) return nil;
+    NSString *v = CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)key, (__bridge CFStringRef)MG_SUITE));
+    if (![v isKindOfClass:[NSString class]] || v.length == 0) v = @"none";
+    return MGActionTitle(v);
 }
 
 - (NSArray *)specifiers
@@ -141,21 +139,21 @@ static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
 
         if (!splitOn) {
             // ===== 模式1: 左右耳朵共用 =====
-            [m addObject:MGGroup(self, @"公共手势（左右耳朵共用）", @"点击任意一行弹出选择菜单，选完立即生效、右侧同步显示。\n选「无」代表单独禁用该手势。\n长按、三击、上滑、下滑始终交给系统，不占用。")];
-            [m addObject:MGList(self, @"单击", @"singleTap", MGValsSingle())];
-            [m addObject:MGList(self, @"双击", @"doubleTap", MGValsDouble())];
-            [m addObject:MGList(self, @"左滑", @"swipeLeft", MGValsSwipe())];
+            [m addObject:MGGroup(self, @"公共手势（左右耳朵共用）", @"点击任意一行进入动作选择页：打开一项即选中（单选），立即生效。\n选「无」代表单独禁用该手势。\n长按、三击、上滑、下滑始终交给系统，不占用。")];
+            [m addObject:MGLink(self, @"单击", @"singleTap", NSClassFromString(@"MGPickerSingleTap"))];
+            [m addObject:MGLink(self, @"双击", @"doubleTap", NSClassFromString(@"MGPickerDoubleTap"))];
+            [m addObject:MGLink(self, @"左滑", @"swipeLeft", NSClassFromString(@"MGPickerSwipeLeft"))];
         } else {
             // ===== 模式2: 左右分段独立 =====
             [m addObject:MGGroup(self, @"状态栏‑左段｜时间侧", @"刘海/灵动岛左侧的耳朵区域，只在此区域内生效。")];
-            [m addObject:MGList(self, @"单击", @"left_singleTap", MGValsSingle())];
-            [m addObject:MGList(self, @"双击", @"left_doubleTap", MGValsDouble())];
-            [m addObject:MGList(self, @"左滑", @"left_swipeLeft", MGValsSwipe())];
+            [m addObject:MGLink(self, @"单击", @"left_singleTap", NSClassFromString(@"MGPickerLSingleTap"))];
+            [m addObject:MGLink(self, @"双击", @"left_doubleTap", NSClassFromString(@"MGPickerLDoubleTap"))];
+            [m addObject:MGLink(self, @"左滑", @"left_swipeLeft", NSClassFromString(@"MGPickerLSwipeLeft"))];
 
             [m addObject:MGGroup(self, @"状态栏‑右段｜电池信号侧", @"刘海/灵动岛右侧的耳朵区域（信号/Wi‑Fi/电池），只在此区域内生效。")];
-            [m addObject:MGList(self, @"单击", @"right_singleTap", MGValsSingle())];
-            [m addObject:MGList(self, @"双击", @"right_doubleTap", MGValsDouble())];
-            [m addObject:MGList(self, @"左滑", @"right_swipeLeft", MGValsSwipe())];
+            [m addObject:MGLink(self, @"单击", @"right_singleTap", NSClassFromString(@"MGPickerRSingleTap"))];
+            [m addObject:MGLink(self, @"双击", @"right_doubleTap", NSClassFromString(@"MGPickerRDoubleTap"))];
+            [m addObject:MGLink(self, @"左滑", @"right_swipeLeft", NSClassFromString(@"MGPickerRSwipeLeft"))];
         }
 
         // ===== 全局设置 =====
