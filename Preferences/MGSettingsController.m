@@ -96,7 +96,7 @@ static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
 - (void)viewWillAppear:(BOOL)animated
 {
     [super viewWillAppear:animated];
-    self.title = @"我的手势 0.9.0";
+    self.title = @"我的手势 0.10.0";
     [self attachDiagramHeader];
 }
 
@@ -129,6 +129,7 @@ static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
         MGEnsureDefault(@"lockScreenEnabled", @YES);
         MGEnsureDefault(@"hapticsEnabled", @YES);
         MGEnsureDefault(@"tapInterval", @0.32);
+        MGEnsureDefault(@"sn3Enabled", @YES);
 
         NSMutableArray *m = [NSMutableArray array];
 
@@ -165,6 +166,8 @@ static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
         [m addObject:MGSwitch(self, @"锁屏界面启用手势", @"lockScreenEnabled")];
         [m addObject:MGSwitch(self, @"手势震动反馈", @"hapticsEnabled")];
         [m addObject:MGSlider(self, @"双击识别间隔(秒)", @"tapInterval")];
+        [m addObject:MGGroup(self, @"超级截图", @"开启后，手势可触发超级截图框选界面。需已安装超级截图插件（SN3延伸板）并完成设备授权。")];
+        [m addObject:MGSwitch(self, @"手势快速触发超级截图", @"sn3Enabled")];
         [m addObject:MGGroup(self, @"应用管理", nil)];
         PSSpecifier *lk = MGNewSpec(self, @"我的链接", self, NULL, NULL,
             NSClassFromString(@"MGLinksController"), PSLinkCell);
