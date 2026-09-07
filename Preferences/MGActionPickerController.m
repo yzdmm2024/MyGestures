@@ -33,15 +33,15 @@ NSString *MGActionTitle(NSString *act)
         @"respring":      @"Respring注销",
         @"home":          @"返回主屏幕",
         @"settingspanel": @"打开本工具设置面板",
-        @"camera":        @"相机",
+        @"ctrlcenter":    @"控制中心",
     };
     return map[act] ?: act;
 }
 
-// 各手势类型允许的动作 (v0.7.0 精简: 只保留真机验证有效的)
-static NSArray *MGActsSingle(void) { return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home", @"camera", @"settingspanel"]; };
-static NSArray *MGActsDouble(void) { return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home", @"camera"]; };
-static NSArray *MGActsSwipe(void)  { return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home", @"camera"]; };
+// 各手势类型允许的动作 (v0.8.0: 只保留真机验证有效的)
+static NSArray *MGActsSingle(void) { return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home", @"ctrlcenter", @"settingspanel"]; };
+static NSArray *MGActsDouble(void) { return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home", @"ctrlcenter"]; };
+static NSArray *MGActsSwipe(void)  { return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home", @"ctrlcenter"]; };
 
 #pragma mark - 选择子页面基类
 

@@ -522,13 +522,30 @@ static BOOL MGLaunchApp(NSString *bid)
     return YES;
 }
 
-static void MGOpenCamera(void)
+// 打开控制中心: SBControlCenterController presentAnimated:completion:
+// (开源插件 ShakeItOff 同款写法, iOS 16.3 运行时头文件确认 API 存在; 控制中心里点相机是系统预热秒开)
+static void MGOpenControlCenter(void)
 {
-    if (MGLaunchApp(@"com.apple.camera")) {
-        MGLog(@"相机 成功 (SBS 启动)");
-        return;
+    @try {
+        Class c = objc_getClass("SBControlCenterController");
+        if (!c) { MGLog(@"控制中心失败: 类不存在"); return; }
+        id inst = ((id (*)(id, SEL))objc_msgSend)(c, sel_registerName("sharedInstance"));
+        SEL vis = sel_registerName("isVisible");
+        SEL pres = sel_registerName("presentAnimated:completion:");
+        if (inst && [inst respondsToSelector:vis] && [inst respondsToSelector:pres]) {
+            BOOL visible = ((BOOL (*)(id, SEL))objc_msgSend)(inst, vis);
+            if (!visible) {
+                ((void (*)(id, SEL, BOOL, id))objc_msgSend)(inst, pres, YES, nil);
+                MGLog(@"控制中心 成功 (presentAnimated)");
+            } else {
+                MGLog(@"控制中心已打开, 忽略");
+            }
+            return;
+        }
+        MGLog(@"控制中心失败: API 不可用");
+    } @catch (NSException *e) {
+        MGLog(@"控制中心异常: %@", e);
     }
-    MGOpenURLString(@"camera://"); // 兜底
 }
 static void MGOpenWLAN(void)     { MGOpenURLString(@"prefs:root=WIFI"); }
 static void MGToggleCellular(void)
@@ -886,7 +903,7 @@ static void MGPerformInSpringBoard(NSString *action)
     else if ([action isEqualToString:@"respring"])    MGRespring();
     else if ([action isEqualToString:@"home"])        MGGoHome();
     else if ([action isEqualToString:@"settingspanel"]) MGOpenPrefsPanel();
-    else if ([action isEqualToString:@"camera"])      MGOpenCamera();
+    else if ([action isEqualToString:@"ctrlcenter"])  MGOpenControlCenter();
 }
 
 /* ============ darwin 通知: 把 App 内的手势转发给 SpringBoard ============ */
@@ -1141,7 +1158,7 @@ static BOOL MGAppBlacklisted(void)
     @autoreleasepool {
         if (MGIsSpringBoard()) {
             CFNotificationCenterRef nc = CFNotificationCenterGetDarwinNotifyCenter();
-            for (NSString *a in @[@"lock", @"screenshot", @"respring", @"flashlight", @"home", @"settingspanel", @"camera", @"link", @"run"]) {
+            for (NSString *a in @[@"lock", @"screenshot", @"respring", @"flashlight", @"home", @"settingspanel", @"ctrlcenter", @"link", @"run"]) {
                 CFNotificationCenterAddObserver(nc, NULL, MGDarwinCallback,
                     (__bridge CFStringRef)[kNotifyPrefix stringByAppendingString:a],
                     NULL, CFNotificationSuspensionBehaviorCoalesce);
