@@ -540,6 +540,29 @@ static void MGTriggerSN3(void)
     MGLog(@"超级截图 触发 (SN3 cc.capture)");
 }
 
+// 秒开相机: SBUIController activateApplication:fromIcon:location:activationSettings:actions:
+// 和桌面点相机图标同一路径, 比 SBSLaunchApplicationWithIdentifier 更快
+static void MGCameraOpen(void)
+{
+    @try {
+        Class appCtl = objc_getClass("SBApplicationController");
+        Class uiCtl = objc_getClass("SBUIController");
+        if (!appCtl || !uiCtl) { MGLog(@"相机失败: 类不存在"); return; }
+        id app = ((id (*)(id, SEL, id))objc_msgSend)(
+            ((id (*)(id, SEL))objc_msgSend)((id)appCtl, sel_registerName("sharedInstance")),
+            sel_registerName("applicationWithBundleIdentifier:"),
+            @"com.apple.camera");
+        if (!app) { MGLog(@"相机失败: 找不到 Camera App"); return; }
+        ((void (*)(id, SEL, id, id, id, id, id))objc_msgSend)(
+            ((id (*)(id, SEL))objc_msgSend)((id)uiCtl, sel_registerName("sharedInstance")),
+            sel_registerName("activateApplication:fromIcon:location:activationSettings:actions:"),
+            app, NULL, NULL, NULL, NULL);
+        MGLog(@"相机启动 (SBUIController)");
+    } @catch (NSException *e) {
+        MGLog(@"相机异常: %@", e);
+    }
+}
+
 static void MGOpenControlCenter(void)
 {
     @try {
@@ -922,7 +945,7 @@ static void MGPerformInSpringBoard(NSString *action)
     else if ([action isEqualToString:@"ctrlcenter"])  MGOpenControlCenter();
     else if ([action isEqualToString:@"bluetooth"])   MGToggleBluetooth();
     else if ([action isEqualToString:@"appswitcher"]) MGAppSwitcher();
-    else if ([action isEqualToString:@"camera"])       MGOpenAppByID(@"com.apple.camera");
+    else if ([action isEqualToString:@"camera"])       MGCameraOpen();
     else if ([action isEqualToString:@"sn3"])         MGTriggerSN3();
 }
 
