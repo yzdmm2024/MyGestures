@@ -161,7 +161,7 @@ static UIImage *MGIconResized(UIImage *img)
                 NSString *bid = [row[1] lowercaseString];
                 if (![name containsString:q] && ![bid containsString:q]) continue;
             }
-            PSSpecifier *s = MGNewSpec(self, row[0], nil,
+            PSSpecifier *s = MGNewSpec(self, row[0], self,
                 @selector(setPreferenceValue:specifier:), @selector(readPreferenceValue:), nil, PSSwitchCell);
             [s setProperty:MG_SUITE forKey:@"defaults"];
             [s setProperty:[@"bl_" stringByAppendingString:row[1]] forKey:@"key"];
