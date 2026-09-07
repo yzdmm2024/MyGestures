@@ -529,6 +529,10 @@ static BOOL MGLaunchApp(NSString *bid)
 // 前提: 手机装有 超级截图(SN3延伸板) 并启用; 未装时无人响应, 不会崩
 static void MGTriggerSN3(void)
 {
+    if (!MGPrefBool(@"sn3Enabled", YES)) {
+        MGLog(@"超级截图已禁用 (sn3Enabled=NO)");
+        return;
+    }
     CFNotificationCenterPostNotification(
         CFNotificationCenterGetDarwinNotifyCenter(),
         CFSTR("com.axs.snapper3zhext.cc.capture"),
