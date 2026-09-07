@@ -37,6 +37,9 @@
 static NSString *const kSuite        = @"com.local.mygestures";
 static NSString *const kNotifyPrefix = @"com.local.mygestures.";
 
+// SBCameraHardwareButton 单例引用 (秒开相机用)
+static id gCameraButtonInstance = nil;
+
 // 偏好内存缓存 (v0.7.1 性能修复):
 // 旧实现每次触摸都同步等待 cfprefsd (跨进程往返), 全系统每一次触摸都被卡一下;
 // 现改为内存缓存: 面板改动经 CFPreferences 变更通知立即失效缓存, 另有 2 秒 TTL 兜底
@@ -540,10 +543,20 @@ static void MGTriggerSN3(void)
     MGLog(@"超级截图 触发 (SN3 cc.capture)");
 }
 
-// 秒开相机: SBUIController activateApplication:fromIcon:location:activationSettings:actions:
-// 和桌面点相机图标同一路径, 比 SBSLaunchApplicationWithIdentifier 更快
+// 秒开相机: SBCameraHardwareButton._launchCameraIfReady
+// 和物理相机按钮/控制中心相机同一预热路径, 真正秒开
 static void MGCameraOpen(void)
 {
+    if (gCameraButtonInstance) {
+        @try {
+            MGLog(@"相机秒开 (SBCameraHardwareButton._launchCameraIfReady)");
+            ((void (*)(id, SEL))objc_msgSend)(gCameraButtonInstance, sel_registerName("_launchCameraIfReady"));
+            return;
+        } @catch (NSException *e) {
+            MGLog(@"相机秒开异常: %@", e);
+        }
+    }
+    // 兜底: 走 SBUIController 冷启动
     @try {
         Class appCtl = objc_getClass("SBApplicationController");
         Class uiCtl = objc_getClass("SBUIController");
@@ -557,7 +570,7 @@ static void MGCameraOpen(void)
             ((id (*)(id, SEL))objc_msgSend)((id)uiCtl, sel_registerName("sharedInstance")),
             sel_registerName("activateApplication:fromIcon:location:activationSettings:actions:"),
             app, NULL, NULL, NULL, NULL);
-        MGLog(@"相机启动 (SBUIController)");
+        MGLog(@"相机启动 (SBUIController 兜底)");
     } @catch (NSException *e) {
         MGLog(@"相机异常: %@", e);
     }
@@ -1162,6 +1175,17 @@ static BOOL MGAppBlacklisted(void)
 @end
 
 /* ========================= Hook ========================= */
+
+%hook SBCameraHardwareButton
+
+- (id)init {
+    %orig;
+    gCameraButtonInstance = self;
+    MGLog(@"SBCameraHardwareButton 实例已捕获");
+    return self;
+}
+
+%end
 
 %hook UIWindow
 
