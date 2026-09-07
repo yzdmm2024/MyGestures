@@ -30,7 +30,7 @@
 #import <dlfcn.h>
 #import <math.h>
 
-#define MGLog(fmt, ...) NSLog(@"[MyGestures] " fmt, ##__VA_ARGS__)
+#define MGLog(fmt, ...) NSLog(@"[MyGestures] %@", [NSString stringWithFormat:fmt, ##__VA_ARGS__])
 
 /* ========================= 偏好设置 ========================= */
 
@@ -1165,8 +1165,7 @@ static BOOL MGAppBlacklisted(void)
 
 %hook UIWindow
 
-- (void)sendEvent:(UIEvent *)event
-{
+- (void)sendEvent:(UIEvent *)event {
     %orig; // 只观察, 不拦截: 下滑/长按/三击/上滑等事件完整透传给系统
 
     @try {
