@@ -43,6 +43,10 @@ static NSString *const kNotifyPrefix = @"com.local.mygestures.";
 static NSMutableDictionary *mgPrefCache = nil;
 static CFTimeInterval mgPrefLastFetch = 0;
 
+// 14.5 SDK 头文件未声明 CFPreferencesAddObserver, 手动声明
+typedef void (*MGPrefsCallback)(void *observer, CFStringRef key, void *context);
+extern void CFPreferencesAddObserver(CFStringRef applicationID, void *observer, MGPrefsCallback callback, CFStringRef key, void *context);
+
 static void MGPrefChangeCB(void *observer, CFStringRef key, void *context)
 {
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -56,7 +60,7 @@ static id MGPrefValue(NSString *key)
     dispatch_once(&once, ^{
         mgPrefCache = [NSMutableDictionary new];
         CFPreferencesAddObserver((__bridge CFStringRef)kSuite, NULL,
-            (CFPreferencesCallback)MGPrefChangeCB, NULL, NULL);
+            (MGPrefsCallback)MGPrefChangeCB, NULL, NULL);
     });
     CFTimeInterval now = CACurrentMediaTime();
     if (now - mgPrefLastFetch > 2.0) { // TTL 兜底: 通知万一漏掉, 设置改动最多延迟 2 秒生效
