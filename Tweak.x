@@ -922,6 +922,7 @@ static void MGPerformInSpringBoard(NSString *action)
     else if ([action isEqualToString:@"ctrlcenter"])  MGOpenControlCenter();
     else if ([action isEqualToString:@"bluetooth"])   MGToggleBluetooth();
     else if ([action isEqualToString:@"appswitcher"]) MGAppSwitcher();
+    else if ([action isEqualToString:@"camera"])       MGOpenAppByID(@"com.apple.camera");
     else if ([action isEqualToString:@"sn3"])         MGTriggerSN3();
 }
 

@@ -36,15 +36,16 @@ NSString *MGActionTitle(NSString *act)
         @"ctrlcenter":    @"控制中心",
         @"bluetooth":     @"蓝牙开关",
         @"appswitcher":   @"App切换器（多任务）",
+        @"camera":        @"打开相机",
         @"sn3":           @"超级截图",
     };
     return map[act] ?: act;
 }
 
 // 各手势类型允许的动作 (v0.9.0: 只保留真机验证有效的)
-static NSArray *MGActsSingle(void) { return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home", @"ctrlcenter", @"bluetooth", @"appswitcher", @"sn3", @"settingspanel"]; };
-static NSArray *MGActsDouble(void) { return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home", @"ctrlcenter", @"bluetooth", @"appswitcher", @"sn3"]; };
-static NSArray *MGActsSwipe(void)  { return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home", @"ctrlcenter", @"bluetooth", @"appswitcher", @"sn3"]; };
+static NSArray *MGActsSingle(void) { return @[@"none", @"lock", @"screenshot", @"flashlight", @"camera", @"respring", @"home", @"ctrlcenter", @"bluetooth", @"appswitcher", @"sn3", @"settingspanel"]; };
+static NSArray *MGActsDouble(void) { return @[@"none", @"lock", @"screenshot", @"flashlight", @"camera", @"respring", @"home", @"ctrlcenter", @"bluetooth", @"appswitcher", @"sn3"]; };
+static NSArray *MGActsSwipe(void)  { return @[@"none", @"lock", @"screenshot", @"flashlight", @"camera", @"respring", @"home", @"ctrlcenter", @"bluetooth", @"appswitcher", @"sn3"]; };
 
 #pragma mark - 选择子页面基类
 
