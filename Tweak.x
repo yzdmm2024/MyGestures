@@ -37,11 +37,38 @@
 static NSString *const kSuite        = @"com.local.mygestures";
 static NSString *const kNotifyPrefix = @"com.local.mygestures.";
 
+// 偏好内存缓存 (v0.7.1 性能修复):
+// 旧实现每次触摸都同步等待 cfprefsd (跨进程往返), 全系统每一次触摸都被卡一下;
+// 现改为内存缓存: 面板改动经 CFPreferences 变更通知立即失效缓存, 另有 2 秒 TTL 兜底
+static NSMutableDictionary *mgPrefCache = nil;
+static CFTimeInterval mgPrefLastFetch = 0;
+
+static void MGPrefChangeCB(void *observer, CFStringRef key, void *context)
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (mgPrefCache) [mgPrefCache removeAllObjects]; // 偏好被(面板)修改 → 缓存立即失效
+    });
+}
+
 static id MGPrefValue(NSString *key)
 {
-    CFPreferencesAppSynchronize((__bridge CFStringRef)kSuite);
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        mgPrefCache = [NSMutableDictionary new];
+        CFPreferencesAddObserver((__bridge CFStringRef)kSuite, NULL,
+            (CFPreferencesCallback)MGPrefChangeCB, NULL, NULL);
+    });
+    CFTimeInterval now = CACurrentMediaTime();
+    if (now - mgPrefLastFetch > 2.0) { // TTL 兜底: 通知万一漏掉, 设置改动最多延迟 2 秒生效
+        [mgPrefCache removeAllObjects];
+        mgPrefLastFetch = now;
+    }
+    id cached = mgPrefCache[key];
+    if (cached) return [cached isEqual:NSNull.null] ? nil : cached;
     CFTypeRef raw = CFPreferencesCopyAppValue((__bridge CFStringRef)key, (__bridge CFStringRef)kSuite);
-    return raw ? CFBridgingRelease(raw) : nil;
+    id val = raw ? CFBridgingRelease(raw) : (id)NSNull.null;
+    mgPrefCache[key] = val;
+    return [val isEqual:NSNull.null] ? nil : val;
 }
 
 static NSString *MGPrefString(NSString *key)
