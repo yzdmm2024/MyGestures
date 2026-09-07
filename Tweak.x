@@ -43,9 +43,8 @@ static NSString *const kNotifyPrefix = @"com.local.mygestures.";
 static NSMutableDictionary *mgPrefCache = nil;
 static CFTimeInterval mgPrefLastFetch = 0;
 
-// 14.5 SDK 头文件未声明 CFPreferencesAddObserver, 手动声明
-typedef void (*MGPrefsCallback)(void *observer, CFStringRef key, void *context);
-extern void CFPreferencesAddObserver(CFStringRef applicationID, void *observer, MGPrefsCallback callback, CFStringRef key, void *context);
+// 14.5 SDK 的 tbd 未导出 CFPreferencesAddObserver, 运行时 dlsym 获取
+static void (*mgPrefsAddObs)(CFStringRef, void *, void (*)(void *, CFStringRef, void *), CFStringRef, void *) = NULL;
 
 static void MGPrefChangeCB(void *observer, CFStringRef key, void *context)
 {
@@ -59,8 +58,9 @@ static id MGPrefValue(NSString *key)
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         mgPrefCache = [NSMutableDictionary new];
-        CFPreferencesAddObserver((__bridge CFStringRef)kSuite, NULL,
-            (MGPrefsCallback)MGPrefChangeCB, NULL, NULL);
+        void *h = dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", RTLD_LAZY);
+        if (h) mgPrefsAddObs = (void (*)(CFStringRef, void *, void (*)(void *, CFStringRef, void *), CFStringRef, void *))dlsym(h, "CFPreferencesAddObserver");
+        if (mgPrefsAddObs) mgPrefsAddObs((__bridge CFStringRef)kSuite, NULL, MGPrefChangeCB, NULL, NULL);
     });
     CFTimeInterval now = CACurrentMediaTime();
     if (now - mgPrefLastFetch > 2.0) { // TTL 兜底: 通知万一漏掉, 设置改动最多延迟 2 秒生效
