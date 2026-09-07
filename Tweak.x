@@ -855,21 +855,7 @@ static void MGPerformInSpringBoard(NSString *action)
     else if ([action isEqualToString:@"respring"])    MGRespring();
     else if ([action isEqualToString:@"home"])        MGGoHome();
     else if ([action isEqualToString:@"settingspanel"]) MGOpenPrefsPanel();
-    else if ([action isEqualToString:@"wifi"])        MGToggleWiFi();
-    else if ([action isEqualToString:@"bluetooth"])   MGToggleBluetooth();
-    else if ([action isEqualToString:@"airplane"])    MGToggleAirplane();
-    else if ([action isEqualToString:@"lowpower"])    MGToggleLowPower();
-    else if ([action isEqualToString:@"playpause"])   MGTogglePlayPause();
-    else if ([action isEqualToString:@"nexttrack"])   MGNextTrack();
-    else if ([action isEqualToString:@"prevtrack"])   MGPrevTrack();
-    else if ([action isEqualToString:@"volup"])       MGVolUp();
-    else if ([action isEqualToString:@"voldown"])     MGVolDown();
-    else if ([action isEqualToString:@"mute"])        MGMute();
-    else if ([action isEqualToString:@"appswitcher"]) MGAppSwitcher();
     else if ([action isEqualToString:@"camera"])      MGOpenCamera();
-    else if ([action isEqualToString:@"wlan"])        MGOpenWLAN();
-    else if ([action isEqualToString:@"cellular"])    MGToggleCellular();
-    else if ([action isEqualToString:@"drawer"])      MGShowDrawer();
 }
 
 /* ============ darwin 通知: 把 App 内的手势转发给 SpringBoard ============ */
@@ -1124,10 +1110,7 @@ static BOOL MGAppBlacklisted(void)
     @autoreleasepool {
         if (MGIsSpringBoard()) {
             CFNotificationCenterRef nc = CFNotificationCenterGetDarwinNotifyCenter();
-            for (NSString *a in @[@"lock", @"screenshot", @"respring", @"flashlight", @"home", @"settingspanel",
-                                  @"wifi", @"bluetooth", @"airplane", @"lowpower", @"playpause", @"nexttrack", @"prevtrack",
-                                  @"volup", @"voldown", @"mute", @"appswitcher", @"link", @"run",
-                                  @"camera", @"wlan", @"cellular", @"drawer"]) {
+            for (NSString *a in @[@"lock", @"screenshot", @"respring", @"flashlight", @"home", @"settingspanel", @"camera", @"link", @"run"]) {
                 CFNotificationCenterAddObserver(nc, NULL, MGDarwinCallback,
                     (__bridge CFStringRef)[kNotifyPrefix stringByAppendingString:a],
                     NULL, CFNotificationSuspensionBehaviorCoalesce);

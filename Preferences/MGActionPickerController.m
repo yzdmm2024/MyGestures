@@ -33,38 +33,15 @@ NSString *MGActionTitle(NSString *act)
         @"respring":      @"Respring注销",
         @"home":          @"返回主屏幕",
         @"settingspanel": @"打开本工具设置面板",
-        @"wifi":          @"WiFi开关",
-        @"bluetooth":     @"蓝牙开关",
-        @"airplane":      @"飞行模式",
-        @"lowpower":      @"低电量模式",
-        @"playpause":     @"播放/暂停音乐",
-        @"nexttrack":     @"下一首",
-        @"prevtrack":     @"上一首",
-        @"volup":         @"音量 +",
-        @"voldown":       @"音量 −",
-        @"mute":          @"静音",
-        @"appswitcher":   @"App切换器（多任务）",
         @"camera":        @"相机",
-        @"wlan":          @"无线局域网",
-        @"cellular":          @"蜂窝网络开关",
-        @"drawer":        @"应用抽屉",
     };
     return map[act] ?: act;
 }
 
-// 各手势类型允许的动作
-static NSArray *MGActsSingle(void) { return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home",
-    @"camera", @"drawer",
-    @"wifi", @"wlan", @"cellular", @"bluetooth", @"airplane", @"lowpower",
-    @"playpause", @"nexttrack", @"prevtrack", @"volup", @"voldown", @"mute", @"appswitcher", @"settingspanel"]; };
-static NSArray *MGActsDouble(void) { return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home",
-    @"camera", @"drawer",
-    @"wifi", @"wlan", @"cellular", @"bluetooth", @"airplane", @"lowpower",
-    @"playpause", @"nexttrack", @"prevtrack", @"volup", @"voldown", @"mute", @"appswitcher"]; };
-static NSArray *MGActsSwipe(void)  { return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home",
-    @"camera", @"drawer",
-    @"wifi", @"wlan", @"cellular", @"bluetooth", @"airplane", @"lowpower",
-    @"playpause", @"nexttrack", @"prevtrack", @"volup", @"voldown", @"mute", @"appswitcher"]; };
+// 各手势类型允许的动作 (v0.7.0 精简: 只保留真机验证有效的)
+static NSArray *MGActsSingle(void) { return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home", @"camera", @"settingspanel"]; };
+static NSArray *MGActsDouble(void) { return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home", @"camera"]; };
+static NSArray *MGActsSwipe(void)  { return @[@"none", @"lock", @"screenshot", @"flashlight", @"respring", @"home", @"camera"]; };
 
 #pragma mark - 选择子页面基类
 
