@@ -524,6 +524,18 @@ static BOOL MGLaunchApp(NSString *bid)
 
 // 打开控制中心: SBControlCenterController presentAnimated:completion:
 // (开源插件 ShakeItOff 同款写法, iOS 16.3 运行时头文件确认 API 存在; 控制中心里点相机是系统预热秒开)
+// 超级截图 (SN3 延伸板 v5.8+ 自带 darwin 触发口, 与控制中心按钮同一通知):
+// 拉起遮罩框选截图 → 框选后出现 OCR/翻译/长截图/问AI 菜单
+// 前提: 手机装有 超级截图(SN3延伸板) 并启用; 未装时无人响应, 不会崩
+static void MGTriggerSN3(void)
+{
+    CFNotificationCenterPostNotification(
+        CFNotificationCenterGetDarwinNotifyCenter(),
+        CFSTR("com.axs.snapper3zhext.cc.capture"),
+        NULL, NULL, TRUE);
+    MGLog(@"超级截图 触发 (SN3 cc.capture)");
+}
+
 static void MGOpenControlCenter(void)
 {
     @try {
@@ -904,6 +916,9 @@ static void MGPerformInSpringBoard(NSString *action)
     else if ([action isEqualToString:@"home"])        MGGoHome();
     else if ([action isEqualToString:@"settingspanel"]) MGOpenPrefsPanel();
     else if ([action isEqualToString:@"ctrlcenter"])  MGOpenControlCenter();
+    else if ([action isEqualToString:@"bluetooth"])   MGToggleBluetooth();
+    else if ([action isEqualToString:@"appswitcher"]) MGAppSwitcher();
+    else if ([action isEqualToString:@"sn3"])         MGTriggerSN3();
 }
 
 /* ============ darwin 通知: 把 App 内的手势转发给 SpringBoard ============ */
@@ -1158,7 +1173,7 @@ static BOOL MGAppBlacklisted(void)
     @autoreleasepool {
         if (MGIsSpringBoard()) {
             CFNotificationCenterRef nc = CFNotificationCenterGetDarwinNotifyCenter();
-            for (NSString *a in @[@"lock", @"screenshot", @"respring", @"flashlight", @"home", @"settingspanel", @"ctrlcenter", @"link", @"run"]) {
+            for (NSString *a in @[@"lock", @"screenshot", @"respring", @"flashlight", @"home", @"settingspanel", @"ctrlcenter", @"bluetooth", @"appswitcher", @"sn3", @"link", @"run"]) {
                 CFNotificationCenterAddObserver(nc, NULL, MGDarwinCallback,
                     (__bridge CFStringRef)[kNotifyPrefix stringByAppendingString:a],
                     NULL, CFNotificationSuspensionBehaviorCoalesce);
