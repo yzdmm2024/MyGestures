@@ -529,7 +529,7 @@ static BOOL MGLaunchApp(NSString *bid)
 // (开源插件 ShakeItOff 同款写法, iOS 16.3 运行时头文件确认 API 存在; 控制中心里点相机是系统预热秒开)
 // 超级截图 (SN3 延伸板 v5.8+ 自带 darwin 触发口, 与控制中心按钮同一通知):
 // 拉起遮罩框选截图 → 框选后出现 OCR/翻译/长截图/问AI 菜单
-// 前提: 手机装有 超级截图(SN3延伸板) 并启用; 未装时无人响应, 不会崩
+// 前提: 手机装有 超级截图(com.axs.superscreenshot) 并启用; 未装时无人响应, 不会崩
 static void MGTriggerSN3(void)
 {
     if (!MGPrefBool(@"sn3Enabled", YES)) {
@@ -538,9 +538,9 @@ static void MGTriggerSN3(void)
     }
     CFNotificationCenterPostNotification(
         CFNotificationCenterGetDarwinNotifyCenter(),
-        CFSTR("com.axs.snapper3zhext.cc.capture"),
+        CFSTR("com.axs.superscreenshot.cc.capture"),
         NULL, NULL, TRUE);
-    MGLog(@"超级截图 触发 (SN3 cc.capture)");
+    MGLog(@"超级截图 触发 (superscreenshot cc.capture)");
 }
 
 // 秒开相机: SBCameraHardwareButton._launchCameraIfReady
