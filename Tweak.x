@@ -1033,8 +1033,9 @@ static void MGDispatchAction(NSString *action)
 // 本函数直读 cfprefsd, 不走 2 秒内存缓存, 保证跨进程即时更新。
 static NSString *MGForegroundScenesBundleID(void)
 {
-    NSDictionary *d = CFBridgingRelease(CFPreferencesCopyApplicationPreferences((__bridge CFStringRef)kSuite));
-    if (![d isKindOfClass:[NSDictionary class]]) return nil;
+    // 用公开 API persistentDomainForName: 读该 suite 全部偏好 (CFPreferencesCopyApplicationPreferences
+    // 在低版本 SDK 头文件未声明, 无法直接链接); 与 App 进程 CFPreferencesSetAppValue 写的是同一 plist。
+    NSDictionary *d = [[NSUserDefaults standardUserDefaults] persistentDomainForName:kSuite];
     for (NSString *k in d) {
         if (![k hasPrefix:@"mgfg_"]) continue;
         NSNumber *v = d[k];
