@@ -1026,11 +1026,28 @@ static void MGDispatchAction(NSString *action)
 
 /* ========================= 手势识别 ========================= */
 
-// App 黑名单: 命中则该 App 内全部状态栏手势失效 (SpringBoard 不受黑名单影响)
+// 前台第三方 App bundle id 上报:
+// 各 App 进程激活时写 mgfg_<bid>=YES, 离开前台写 NO (见 %hook UIApplication)。
+// SpringBoard 据此判断"当前前台是哪个 App" (状态栏手势在 SpringBoard 进程识别,
+// 无法直接用 mainBundle 知道前台 App)。
+// 本函数直读 cfprefsd, 不走 2 秒内存缓存, 保证跨进程即时更新。
+static NSString *MGForegroundScenesBundleID(void)
+{
+    NSDictionary *d = CFBridgingRelease(CFPreferencesCopyApplicationPreferences((__bridge CFStringRef)kSuite));
+    if (![d isKindOfClass:[NSDictionary class]]) return nil;
+    for (NSString *k in d) {
+        if (![k hasPrefix:@"mgfg_"]) continue;
+        NSNumber *v = d[k];
+        if ([v isKindOfClass:[NSNumber class]] && [v boolValue])
+            return [k substringFromIndex:5];
+    }
+    return nil;
+}
+
+// App 黑名单: 命中则该 App 内全部状态栏手势失效 (SpringBoard/桌面/锁屏不受黑名单影响)
 static BOOL MGAppBlacklisted(void)
 {
-    if (MGIsSpringBoard()) return NO;
-    NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
+    NSString *bid = MGForegroundScenesBundleID();
     if (!bid.length) return NO;
     return MGPrefBool([@"bl_" stringByAppendingString:bid], NO);
 }
@@ -1183,6 +1200,27 @@ static BOOL MGAppBlacklisted(void)
     gCameraButtonInstance = self;
     MGLog(@"SBCameraHardwareButton 实例已捕获");
     return self;
+}
+
+%end
+
+// 前台状态上报: 每个 App 进程在前台激活/离开时更新 mgfg_<bid>,
+// 供 SpringBoard 判断"当前前台 App" (黑名单生效的基础)。SpringBoard 进程不写。
+%hook UIApplication
+
+- (void)setApplicationState:(UIApplicationState)state {
+    %orig;
+    if (MGIsSpringBoard()) return;
+    NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
+    if (!bid.length) return;
+    BOOL fg = (state == UIApplicationStateActive);
+    CFStringRef key = (__bridge CFStringRef)[@"mgfg_" stringByAppendingString:bid];
+    BOOL old = MGPrefBool([@"mgfg_" stringByAppendingString:bid], NO);
+    if (old != fg) {
+        CFPreferencesSetAppValue(key, fg ? kCFBooleanTrue : kCFBooleanFalse,
+            (__bridge CFStringRef)kSuite);
+        CFPreferencesAppSynchronize((__bridge CFStringRef)kSuite);
+    }
 }
 
 %end
