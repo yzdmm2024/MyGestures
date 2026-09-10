@@ -96,7 +96,7 @@ static PSSpecifier *MGSlider(id ctrl, NSString *name, NSString *key)
 - (void)viewWillAppear:(BOOL)animated
 {
     [super viewWillAppear:animated];
-    self.title = @"我的手势 0.11.6";
+    self.title = @"我的手势 0.11.7";
     [self attachDiagramHeader];
 }
 

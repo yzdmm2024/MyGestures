@@ -1047,6 +1047,7 @@ static NSString *MGForegroundScenesBundleID(void)
 static NSString *MGFrontAppBundleID(void)
 {
     NSString *direct = nil;
+    // L1: accessibility 前台对象 (对多数 App 有效, 如微信已验证生效)
     @try {
         id app = [[UIApplication sharedApplication]
             performSelector:NSSelectorFromString(@"_accessibilityFrontMostApplication")];
@@ -1057,7 +1058,37 @@ static NSString *MGFrontAppBundleID(void)
                 direct = bid;
         }
     } @catch (NSException *e) {
-        MGLog(@"前台App直读异常: %@", e);
+        MGLog(@"前台App直读异常(L1): %@", e);
+    }
+    // L2: SpringBoard 前台场景句柄 (不依赖 App 进程注入, 纯 SB 侧, 覆盖 L1 拿不到的 App)
+    if (!direct.length) {
+        @try {
+            Class scc = NSClassFromString(@"SBSceneManagerCoordinator");
+            if (scc) {
+                id coord = [scc performSelector:NSSelectorFromString(@"sharedInstance")];
+                id mdsm = nil;
+                if ([coord respondsToSelector:NSSelectorFromString(@"mainDisplaySceneManager")])
+                    mdsm = [coord performSelector:NSSelectorFromString(@"mainDisplaySceneManager")];
+                if (!mdsm) mdsm = [coord valueForKey:@"mainDisplaySceneManager"];
+                if (mdsm) {
+                    NSSet *fg = [mdsm valueForKey:@"externalForegroundApplicationSceneHandles"];
+                    if ([fg isKindOfClass:[NSSet class]]) {
+                        for (id handle in fg) {
+                            id app = [handle valueForKey:@"application"];
+                            if ([app respondsToSelector:@selector(bundleIdentifier)]) {
+                                NSString *b = [app bundleIdentifier];
+                                if (b.length && ![b isEqualToString:@"com.apple.springboard"]) {
+                                    direct = b;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } @catch (NSException *e) {
+            MGLog(@"前台App直读异常(L2): %@", e);
+        }
     }
     if (direct.length) return direct;
     return MGForegroundScenesBundleID();
