@@ -1205,26 +1205,21 @@ static BOOL MGAppBlacklisted(void)
 
 %end
 
-// 前台状态上报: 每个 App 进程在前台激活/离开时更新 mgfg_<bid>,
-// 供 SpringBoard 判断"当前前台 App" (黑名单生效的基础)。SpringBoard 进程不写。
-%hook UIApplication
-
-- (void)setApplicationState:(UIApplicationState)state {
-    %orig;
-    if (MGIsSpringBoard()) return;
-    NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
+// 前台状态上报辅助: 非 SpringBoard 进程在 UIApplication 生命周期通知里调用,
+// 更新 mgfg_<bid>, 供 SpringBoard 判断"当前前台 App" (黑名单生效的基础)。
+// iOS16 上 setApplicationState:(私有 setter) 不保证被调用, 故改用系统保证发送的公开通知。
+static void MGReportFg(NSString *bid, BOOL fg)
+{
     if (!bid.length) return;
-    BOOL fg = (state == UIApplicationStateActive);
     CFStringRef key = (__bridge CFStringRef)[@"mgfg_" stringByAppendingString:bid];
-    BOOL old = MGPrefBool([@"mgfg_" stringByAppendingString:bid], NO);
-    if (old != fg) {
-        CFPreferencesSetAppValue(key, fg ? kCFBooleanTrue : kCFBooleanFalse,
-            (__bridge CFStringRef)kSuite);
-        CFPreferencesAppSynchronize((__bridge CFStringRef)kSuite);
-    }
+    CFTypeRef v = CFPreferencesCopyAppValue(key, (__bridge CFStringRef)kSuite);
+    BOOL cur = (v && CFGetTypeID(v) == CFBooleanGetTypeID()) ? CFBooleanGetValue(v) : NO;
+    if (v) CFRelease(v);
+    if (cur == fg) return;
+    CFPreferencesSetAppValue(key, fg ? kCFBooleanTrue : kCFBooleanFalse,
+        (__bridge CFStringRef)kSuite);
+    CFPreferencesAppSynchronize((__bridge CFStringRef)kSuite);
 }
-
-%end
 
 %hook UIWindow
 
@@ -1276,6 +1271,23 @@ static BOOL MGAppBlacklisted(void)
                     for (NSArray *r in rows) MGTweakIcon(r[1], r[2]);
                     MGLog(@"抽屉预热完成 (%u 应用)", (unsigned)rows.count);
                 }
+            });
+        } else {
+            // 非 SpringBoard 进程: 用公开的 UIApplication 生命周期通知上报前台状态,
+            // 让 SpringBoard 能判断"当前前台是哪个 App" (黑名单生效的基础)。
+            static NSMutableArray *tokens;
+            static dispatch_once_t onceToken;
+            dispatch_once(&onceToken, ^{
+                NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
+                if (!bid.length) return;
+                // 注入时 App 可能已在前台, 先按当前状态初始化一次
+                MGReportFg(bid, [UIApplication sharedApplication].applicationState == UIApplicationStateActive);
+                NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+                NSMutableArray *ts = [NSMutableArray array];
+                [ts addObject:[nc addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:nil usingBlock:^(NSNotification *n){ MGReportFg(bid, YES); }]];
+                [ts addObject:[nc addObserverForName:UIApplicationWillResignActiveNotification object:nil queue:nil usingBlock:^(NSNotification *n){ MGReportFg(bid, NO); }]];
+                [ts addObject:[nc addObserverForName:UIApplicationDidEnterBackgroundNotification object:nil queue:nil usingBlock:^(NSNotification *n){ MGReportFg(bid, NO); }]];
+                tokens = ts; // 强引用, 避免观察者被释放
             });
         }
     }
