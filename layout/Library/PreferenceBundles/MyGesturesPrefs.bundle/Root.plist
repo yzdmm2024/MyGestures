@@ -1,10 +1,10 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <!-- v0.1.0 起面板全部条目由 MGSettingsController 程序化构建 (支持分区模式条件显隐与示意图 header),
      本文件仅保留标题占位 (bundle 三件套之一) -->
 <dict>
 	<key>title</key>
-	<string>我的手势 0.11.5</string>
+	<string>我的手势 0.11.6</string>
 </dict>
 </plist>

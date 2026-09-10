@@ -1026,15 +1026,10 @@ static void MGDispatchAction(NSString *action)
 
 /* ========================= 手势识别 ========================= */
 
-// 前台第三方 App bundle id 上报:
-// 各 App 进程激活时写 mgfg_<bid>=YES, 离开前台写 NO (见 %hook UIApplication)。
-// SpringBoard 据此判断"当前前台是哪个 App" (状态栏手势在 SpringBoard 进程识别,
-// 无法直接用 mainBundle 知道前台 App)。
-// 本函数直读 cfprefsd, 不走 2 秒内存缓存, 保证跨进程即时更新。
+// 前台第三方 App bundle id 兜底判定: 靠各 App 进程注入上报 mgfg_<bid> (见 %ctor else 分支)。
+// 仅在纯 SpringBoard 读前台失效时回退使用。
 static NSString *MGForegroundScenesBundleID(void)
 {
-    // 用公开 API persistentDomainForName: 读该 suite 全部偏好 (CFPreferencesCopyApplicationPreferences
-    // 在低版本 SDK 头文件未声明, 无法直接链接); 与 App 进程 CFPreferencesSetAppValue 写的是同一 plist。
     NSDictionary *d = [[NSUserDefaults standardUserDefaults] persistentDomainForName:kSuite];
     for (NSString *k in d) {
         if (![k hasPrefix:@"mgfg_"]) continue;
@@ -1045,10 +1040,33 @@ static NSString *MGForegroundScenesBundleID(void)
     return nil;
 }
 
+// 纯 SpringBoard 侧读"当前前台 App bundle id":
+// 第三方 App(如微信)在部分越狱环境下未被注入上报链路(探针实测 mgfg_ 只有系统进程写入),
+// 故直接问 SpringBoard 前台应用对象。_accessibilityFrontMostApplication 在手势触摸触发时刻
+// 调用(早已过 SpringBoard 启动), 无 iOS16 启动早期 dispatch_once 重入崩溃的时序风险。
+static NSString *MGFrontAppBundleID(void)
+{
+    NSString *direct = nil;
+    @try {
+        id app = [[UIApplication sharedApplication]
+            performSelector:NSSelectorFromString(@"_accessibilityFrontMostApplication")];
+        if ([app respondsToSelector:@selector(bundleIdentifier)]) {
+            NSString *bid = [app bundleIdentifier];
+            // 桌面/锁屏/系统层会返回 nil 或 SpringBoard 自身, 不视为前台第三方 App
+            if (bid.length && ![bid isEqualToString:@"com.apple.springboard"])
+                direct = bid;
+        }
+    } @catch (NSException *e) {
+        MGLog(@"前台App直读异常: %@", e);
+    }
+    if (direct.length) return direct;
+    return MGForegroundScenesBundleID();
+}
+
 // App 黑名单: 命中则该 App 内全部状态栏手势失效 (SpringBoard/桌面/锁屏不受黑名单影响)
 static BOOL MGAppBlacklisted(void)
 {
-    NSString *bid = MGForegroundScenesBundleID();
+    NSString *bid = MGFrontAppBundleID();
     if (!bid.length) return NO;
     return MGPrefBool([@"bl_" stringByAppendingString:bid], NO);
 }
