@@ -1,4 +1,4 @@
-﻿// MyGestures 设置面板主控制器 v0.1.4
+// MyGestures 设置面板主控制器 v0.1.4
 // 顶部状态栏示意图(绿耳朵/红遮挡区) + 分区模式条件显隐 + 全局设置项
 // 手势行 = PSListItemCell 内嵌下拉: setValues:titles: 注入选项(真机反射确认的方法),
 //          点行弹出原生选择菜单, 右侧实时显示当前值; 读写走 MGPrefsBridge category
