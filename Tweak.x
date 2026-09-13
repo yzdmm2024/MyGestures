@@ -1046,8 +1046,18 @@ static NSString *MGForegroundScenesBundleID(void)
 // 调用(早已过 SpringBoard 启动), 无 iOS16 启动早期 dispatch_once 重入崩溃的时序风险。
 static NSString *MGFrontAppBundleID(void)
 {
+    // 关键修复: 状态栏手势由"前台 App 自身的 UIWindow"捕获, 此时本进程即前台 App,
+    // [NSBundle mainBundle] bundleIdentifier 100% 可靠, 直接用它, 不依赖脆弱的 SpringBoard 查询。
+    // 旧实现优先走 _accessibilityFrontMostApplication: 第三方 App 进程内该 API 多数返回 nil,
+    // 仅微信等少数 App 会返回自身 bid, 其余 App 的 L2(SBSceneManagerCoordinator 在 App 进程里不存在)
+    // 与 mgfg_ 兜底全部失败 → 返回 nil → 黑名单恒为 NO → "只有微信生效"。
+    NSString *selfBid = [[NSBundle mainBundle] bundleIdentifier];
+    if (selfBid.length && ![selfBid isEqualToString:@"com.apple.springboard"])
+        return selfBid;
+
+    // 兜底: 真正落在 SpringBoard(桌面/锁屏) 时, 用原查询确认前台第三方 App
     NSString *direct = nil;
-    // L1: accessibility 前台对象 (对多数 App 有效, 如微信已验证生效)
+    // L1: accessibility 前台对象
     @try {
         id app = [[UIApplication sharedApplication]
             performSelector:NSSelectorFromString(@"_accessibilityFrontMostApplication")];
