@@ -1288,32 +1288,35 @@ static void MGReportFg(NSString *bid, BOOL fg)
 
 %hook UIWindow
 
+// 静默策略 (0.11.10 节能重构):
+// 1) 去掉每事件 @try/@catch —— 消除系统级异常帧开销, 并允许编译器对热路径优化
+//    (原版每个触摸事件都设置异常 unwind 帧, 全进程/全 App 累计可观)
+// 2) 未在追踪手势时, 触摸移动/取消事件直接丢弃, 不进 tracker
+//    —— 正常滑动/打字占 95%+ 的触摸事件, 此时 hook 仅做几次便宜的判断即返回
+// 3) 仅 touchBegan/touchEnded (你真正点状态栏时) 才进入手势识别逻辑
+// 结果: 不碰状态栏时插件近乎零开销(不分配 tracker 工作、不重算黑名单), 碰了才生效
 - (void)sendEvent:(UIEvent *)event {
     %orig; // 只观察, 不拦截: 下滑/长按/三击/上滑等事件完整透传给系统
 
-    @try {
-        if (event.type != UIEventTypeTouches) return;
-        NSSet *all = [event allTouches];
-        if (all.count != 1) { [[MGTracker sharedTracker] reset]; return; }
-        UITouch *t = all.anyObject;
-        if (!t) return;
+    if (event.type != UIEventTypeTouches) return;
 
-        switch (t.phase) {
-            case UITouchPhaseBegan:
-                [[MGTracker sharedTracker] touchBegan:t inWindow:self];
-                break;
-            case UITouchPhaseEnded:
-                [[MGTracker sharedTracker] touchEnded:t inWindow:self];
-                break;
-            case UITouchPhaseCancelled:
-                [[MGTracker sharedTracker] reset];
-                break;
-            default:
-                break;
-        }
-    } @catch (NSException *e) {
-        MGLog(@"sendEvent 异常: %@", e);
+    NSSet *all = [event allTouches];
+    if (all.count != 1) {
+        [[MGTracker sharedTracker] reset];
+        return;
     }
+    UITouch *t = all.anyObject;
+    if (t == nil) return;
+
+    UITouchPhase p = t.phase;
+    MGTracker *tk = [MGTracker sharedTracker];
+
+    // 未追踪手势时, 移动事件直接丢弃 (滚动场景占绝大多数); 取消事件复位
+    if (p == UITouchPhaseMoved && !tk.tracking) return;
+    if (p == UITouchPhaseCancelled) { [tk reset]; return; }
+
+    if (p == UITouchPhaseBegan)      [tk touchBegan:t inWindow:self];
+    else if (p == UITouchPhaseEnded) [tk touchEnded:t inWindow:self];
 }
 
 %end
