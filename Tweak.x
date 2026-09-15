@@ -1026,17 +1026,15 @@ static void MGDispatchAction(NSString *action)
 
 /* ========================= 手势识别 ========================= */
 
-// 前台第三方 App bundle id 兜底判定: 靠各 App 进程注入上报 mgfg_<bid> (见 %ctor else 分支)。
-// 仅在纯 SpringBoard 读前台失效时回退使用。
+// 前台第三方 App bundle id 兜底判定: 读单键 mgfg_current (见 %ctor else 分支的 MGReportFg)。
+// 仅在纯 SpringBoard 读前台失效时回退使用。0.11.9 改为单键, 不再遍历整个偏好域。
 static NSString *MGForegroundScenesBundleID(void)
 {
-    NSDictionary *d = [[NSUserDefaults standardUserDefaults] persistentDomainForName:kSuite];
-    for (NSString *k in d) {
-        if (![k hasPrefix:@"mgfg_"]) continue;
-        NSNumber *v = d[k];
-        if ([v isKindOfClass:[NSNumber class]] && [v boolValue])
-            return [k substringFromIndex:5];
-    }
+    CFTypeRef v = CFPreferencesCopyAppValue((__bridge CFStringRef)@"mgfg_current",
+        (__bridge CFStringRef)kSuite);
+    NSString *bid = (v && CFGetTypeID(v) == CFStringGetTypeID()) ? (__bridge NSString *)v : nil;
+    if (v) CFRelease(v);
+    if (bid.length && ![bid isEqualToString:@"com.apple.springboard"]) return bid;
     return nil;
 }
 
@@ -1265,19 +1263,27 @@ static BOOL MGAppBlacklisted(void)
 %end
 
 // 前台状态上报辅助: 非 SpringBoard 进程在 UIApplication 生命周期通知里调用,
-// 更新 mgfg_<bid>, 供 SpringBoard 判断"当前前台 App" (黑名单生效的基础)。
+// 更新单键 mgfg_current, 供 SpringBoard 判断"当前前台 App" (黑名单生效的基础)。
 // iOS16 上 setApplicationState:(私有 setter) 不保证被调用, 故改用系统保证发送的公开通知。
+// 0.11.9 节能: 去掉 CFPreferencesAppSynchronize —— 避免 WillResignActive 等高频通知里
+// 主线程同步写盘 + 触发全系统 prefs 通知风暴(此前是耗电根因); cfprefsd 会异步落盘,
+// 缓存失效由 SetAppValue 的 notify 保证, 不影响功能。
 static void MGReportFg(NSString *bid, BOOL fg)
 {
     if (!bid.length) return;
-    CFStringRef key = (__bridge CFStringRef)[@"mgfg_" stringByAppendingString:bid];
+    CFStringRef key = (__bridge CFStringRef)@"mgfg_current";
+    // 仅在前台状态真正变化时写盘, 跳过无谓的 set/sync
     CFTypeRef v = CFPreferencesCopyAppValue(key, (__bridge CFStringRef)kSuite);
-    BOOL cur = (v && CFGetTypeID(v) == CFBooleanGetTypeID()) ? CFBooleanGetValue(v) : NO;
+    NSString *cur = (v && CFGetTypeID(v) == CFStringGetTypeID()) ? (__bridge NSString *)v : nil;
     if (v) CFRelease(v);
-    if (cur == fg) return;
-    CFPreferencesSetAppValue(key, fg ? kCFBooleanTrue : kCFBooleanFalse,
-        (__bridge CFStringRef)kSuite);
-    CFPreferencesAppSynchronize((__bridge CFStringRef)kSuite);
+    if (fg) {
+        if ([cur isEqualToString:bid]) return; // 已为该 App, 跳过写盘
+        CFPreferencesSetAppValue(key, (__bridge CFStringRef)bid, (__bridge CFStringRef)kSuite);
+    } else {
+        // 退出前台: 仅当 mgfg_current 指向自己时才清空, 避免后台 App 退到后台误清真正前台的 bid
+        if (cur.length && [cur isEqualToString:bid])
+            CFPreferencesSetAppValue(key, NULL, (__bridge CFStringRef)kSuite);
+    }
 }
 
 %hook UIWindow
